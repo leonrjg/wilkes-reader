@@ -306,6 +306,35 @@ describe("PdfViewer", () => {
     expect(screen.getByText("100%")).toBeInTheDocument();
   });
 
+  it("re-measures the virtualizer when the page it estimates changes size", async () => {
+    // Regression, and the subtlest bug this reader has had.
+    //
+    // `getMeasurements` in virtual-core is memoized on count, gap, lanes and an
+    // internal cache version — `estimateSize` is deliberately not a key. So
+    // when a page changes size (a zoom step, a resized pane, a gutter whose
+    // width is taken out of the page) the library keeps positioning every item
+    // by the old height while this component lays them out at the new one.
+    // Nothing looks wrong on the page you are on: the error is the difference
+    // between the two, it is zero at the top of the document, and it
+    // accumulates — far enough down a long book, scrolling off the foot of one
+    // page lands you in the middle of the next.
+    //
+    // Invalidating is therefore ours to do, and this pins that we still do it.
+    render(<PdfViewer {...defaultProps} />, { host: defaultHost });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    mockVirtualizer.measure.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(screen.getByText("110%")).toBeInTheDocument();
+    expect(mockVirtualizer.measure).toHaveBeenCalled();
+  });
+
   // Build a document proxy whose sampled pages report a uniform body-font size
   // (via the text-transform vertical scale) on a page of the given point width.
   const sizedDoc = (fontSize: number, pageWidth: number) => ({

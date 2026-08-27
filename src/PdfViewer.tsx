@@ -447,6 +447,24 @@ export default function PdfViewer({
     estimateSize: getVirtualPageSize,
     overscan: 2,
   });
+  // Tell the virtualizer its estimates have moved. It will not notice on its
+  // own: `getMeasurements` is memoized on count, gap, lanes and an internal
+  // cache version, and `estimateSize` is deliberately not among them, so a page
+  // that changed size — a zoom step, a resized pane, a gutter whose width is
+  // taken out of the page — leaves every item *positioned* by the old height
+  // while the DOM lays it out at the new one.
+  //
+  // Nothing looks wrong on the page in front of you, which is what made this
+  // hard to see: the error is the difference between the two, it is zero at the
+  // top of the document, and it accumulates. Far enough down a long book,
+  // scrolling off the foot of one page lands you in the middle of the next.
+  //
+  // A layout effect, so the reset lands before the browser paints the frame the
+  // new width was laid out in.
+  useLayoutEffect(() => {
+    virtualizer.measure();
+  }, [virtualizer, renderedWidth, pageMetrics]);
+
   const virtualItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
   const paddingTop = virtualItems[0]?.start ?? 0;
