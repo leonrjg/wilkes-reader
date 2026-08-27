@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getDocument } from "pdfjs-dist";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import { pdfjsAssetUrls } from "./pdfjsAssetUrls.js";
 
@@ -90,6 +90,19 @@ export function loadPdfDocument(source: PdfDocumentSource): Promise<PDFDocumentP
     touch(key, existing);
     return existing.promise;
   }
+
+  // Bundled rather than fetched: the readers run inside a webview with no
+  // network origin to serve a CDN worker from, and pdf.js falling back to the
+  // main thread would block the window on every page it draws.
+  //
+  // Assigned here, on the path every document in every tier goes through,
+  // rather than as a side effect of loading one of the reader components. A
+  // host that takes only the headless tier never mounts those, and would get a
+  // main-thread parse with nothing to say so.
+  GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.min.mjs",
+    import.meta.url,
+  ).toString();
 
   const loadingTask = getDocument({ ...pdfjsReadFrom(source), ...pdfjsAssetUrls() });
   const entry: CacheEntry = { proxy: null, promise: loadingTask.promise, loadingTask };

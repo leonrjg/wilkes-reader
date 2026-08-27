@@ -1,11 +1,12 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDocument } from "pdfjs-dist";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import { usePdfDocument } from "./pdfDocumentCache.js";
 import { pdfjsAssetUrls } from "./pdfjsAssetUrls.js";
 
 vi.mock("pdfjs-dist", () => ({
   getDocument: vi.fn(),
+  GlobalWorkerOptions: { workerSrc: "" },
 }));
 
 /** A loading task, which is what the cache owns and destroys on eviction.
@@ -55,6 +56,20 @@ describe("pdfDocumentCache", () => {
       url: "assets.pdf",
       ...pdfjsAssetUrls(),
     });
+  });
+
+  it("points pdf.js at the bundled worker before it opens anything", async () => {
+    // The assignment used to be a side effect of the composed PDF reader's
+    // module. A host that takes only the headless tier never loads that module,
+    // and pdf.js with no `workerSrc` parses on the main thread — the window
+    // freezes for the length of the document and nothing reports why.
+    GlobalWorkerOptions.workerSrc = "";
+    vi.mocked(getDocument).mockReturnValue(task(Promise.resolve({ numPages: 1 } as any)));
+
+    renderHook(() => usePdfDocument("worker.pdf"));
+
+    await waitFor(() => expect(getDocument).toHaveBeenCalled());
+    expect(GlobalWorkerOptions.workerSrc).toContain("pdf.worker");
   });
 
   describe("a source that is bytes rather than a URL", () => {

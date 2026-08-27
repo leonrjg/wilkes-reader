@@ -9,7 +9,6 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Search as SearchIcon, List } from "react-feather";
-import { GlobalWorkerOptions } from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { installReadableStreamAsyncIterator } from "./readableStreamAsyncIterator.js";
 import PdfPageCanvas from "./PdfPageCanvas.js";
@@ -46,11 +45,6 @@ import {
 } from "./decorations.js";
 import type { PdfReaderSlots } from "./slots.js";
 import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.js";
-
-GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
 
 export interface PdfViewerProps {
   url: string;
