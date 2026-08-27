@@ -26,11 +26,23 @@ otherwise reimplement document loading and text location badly.
 ## Installing
 
 ```
-pnpm add github:leonrjg/wilkes-reader#v0.1.0
+npm install github:leonrjg/wilkes-reader#v0.1.0
 ```
 
-`pdfjs-dist`, `react` and `react-dom` are peer dependencies. While editing the
-package alongside an application, `pnpm link ../wilkes-reader` instead.
+`pdfjs-dist`, `react` and `react-dom` are peer dependencies.
+
+To edit the package alongside an application, link it rather than changing the
+application's manifest — `npm link` touches neither package.json nor the
+lockfile, so the tag stays the committed truth and CI is unaffected:
+
+```
+cd wilkes-reader && npm link
+cd ../Wilkes/ui && npm link @leonrjg/wilkes-reader
+```
+
+`npm ci` restores the tagged version. A linked package resolves to its real
+path, outside the application's root, so the application's dev server needs
+that path in `server.fs.allow` or it will refuse to serve pdf.js' worker.
 
 ## Wiring it into a Vite application
 
@@ -66,20 +78,19 @@ mounts a reader with a host you can change afterwards, and `stubSelectionSlot`.
 
 ## Releasing
 
-`dist/` is committed. Installing from a git tag has no build step: pnpm blocks
-a dependency's `prepare` script unless the consuming project opts in, so a
-package that builds itself on install arrives empty, and the failure surfaces
-as a missing module rather than as a build error. Shipping the artifact also
-means a consumer's CI needs no TypeScript to install.
+`dist/` is not committed. `prepare` builds it wherever the package is
+installed from, which npm runs for git and file specifiers alike, so what a
+consumer gets is always compiled from the source at that tag. A committed
+artifact could go stale and still be believed; a build that runs on install
+either matches the source or fails loudly.
 
-So a release is:
+A release is:
 
 ```
-pnpm run build && git add -A && git commit && git tag vX.Y.Z && git push --tags
+git tag vX.Y.Z && git push --tags
 ```
 
-`pnpm test` runs against `src/`, never `dist/`, so a stale artifact cannot make
-the tests pass.
+Then bump the specifier in each application.
 
 ## Theming
 
