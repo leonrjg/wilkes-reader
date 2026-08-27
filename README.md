@@ -64,6 +64,23 @@ import "@leonrjg/wilkes-reader/testing/setup";
 `@leonrjg/wilkes-reader/testing` also exports `renderWithReaderHost`, which
 mounts a reader with a host you can change afterwards, and `stubSelectionSlot`.
 
+## Releasing
+
+`dist/` is committed. Installing from a git tag has no build step: pnpm blocks
+a dependency's `prepare` script unless the consuming project opts in, so a
+package that builds itself on install arrives empty, and the failure surfaces
+as a missing module rather than as a build error. Shipping the artifact also
+means a consumer's CI needs no TypeScript to install.
+
+So a release is:
+
+```
+pnpm run build && git add -A && git commit && git tag vX.Y.Z && git push --tags
+```
+
+`pnpm test` runs against `src/`, never `dist/`, so a stale artifact cannot make
+the tests pass.
+
 ## Theming
 
 `reader.css` defines a light-only `:root` of defaults so the readers render

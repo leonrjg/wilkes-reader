@@ -34,7 +34,6 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cp src/*.css dist/",
-    "prepare": "tsc -p tsconfig.build.json && cp src/*.css dist/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
