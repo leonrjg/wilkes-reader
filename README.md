@@ -1,9 +1,6 @@
-# wilkes-reader
+## wilkes-reader
 
-Document readers — PDF, Markdown and source — shared between
-[Wilkes](https://github.com/leonrjg/Wilkes) and Underdog. Both are Tauri 2 +
-React 19 applications; both need the same reading surface, and a fix or an
-affordance added here reaches both.
+Document readers — PDF, Markdown and source - used by [Wilkes](https://github.com/leonrjg/Wilkes).
 
 ## What a host provides, and what it gets
 
@@ -78,19 +75,9 @@ mounts a reader with a host you can change afterwards, and `stubSelectionSlot`.
 
 ## Releasing
 
-`dist/` is not committed. `prepare` builds it wherever the package is
-installed from, which npm runs for git and file specifiers alike, so what a
-consumer gets is always compiled from the source at that tag. A committed
-artifact could go stale and still be believed; a build that runs on install
-either matches the source or fails loudly.
-
-A release is:
-
 ```
 git tag vX.Y.Z && git push --tags
 ```
-
-Then bump the specifier in each application.
 
 ## Theming
 
@@ -102,6 +89,17 @@ inferred from a class the readers cannot see.
 ## Bumping pdf.js
 
 `src/pdfTextLayer.css` is a verbatim copy of pdf.js' own text-layer
-stylesheet and **must be re-synced on every version bump**. From pdf.js 6 the
-span geometry lives in that stylesheet, so a stale copy silently misaligns the
-invisible text over the glyphs and breaks selection without erroring.
+stylesheet, which pdf.js publishes only inside its whole viewer application's
+stylesheet. The copy is load-bearing: from pdf.js 6 the span geometry is
+computed there from custom properties the JavaScript sets, so a stale copy
+misaligns the invisible text over the glyphs and breaks selection. Nothing
+about that failure is visible -- no property is missing, so nothing throws; the
+glyphs you see are painted on the canvas by another path; and the text layer is
+transparent by design.
+
+`pdfTextLayer.test.ts` is what makes a bump safe. It holds the copy byte-for-
+byte against the installed pdf.js, checks that nothing the rule reads is left
+unsupplied by what the package ships, and checks that every property
+`PdfTextLayer.tsx` computes is still one the stylesheet reads. Re-copy the
+`.textLayer` rule out of `web/pdf_viewer.css` and the tests will tell you what
+else moved.

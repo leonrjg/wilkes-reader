@@ -51,10 +51,10 @@ export default function PdfTextLayer({ pdf, pageNumber, scale }: Props) {
         if (cancelled) return;
         const viewport = page.getViewport({ scale });
         builder = new TextLayerBuilderCtor({ pdfPage: page });
-        // pdf.js 5.x positions every span via calc(var(--total-scale-factor) * …px)
-        // (4.x used --scale-factor); the viewer normally sets these on the page
-        // div, so we set both here. --user-unit defaults to 1, so total == scale.
-        builder.div.style.setProperty("--scale-factor", String(scale));
+        // Every span's size and position is computed in CSS against this, and
+        // pdf.js' own viewer sets it on the page div. --user-unit defaults to
+        // 1, so the total scale is just the scale. pdfTextLayer.test.ts holds
+        // the name to whatever the copied stylesheet actually reads.
         builder.div.style.setProperty("--total-scale-factor", String(scale));
         // `images` drives pdf.js 6's right-click-to-extract-image placeholders,
         // which this reader does not offer. `TextLayer` guards it

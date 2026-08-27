@@ -17,6 +17,21 @@
 @import "./pdfTextLayer.css";
 @import "./pdfLinkLayer.css";
 
+/* pdf.js declares these on its viewer element, which the package does not
+   ship, while the copied text-layer rule reads them under forced colours.
+   Values are pdf.js' own; without them a find match in High Contrast Mode has
+   a transparent background and no filter, so it disappears entirely. */
+:root {
+  --hcm-highlight-filter: none;
+  --hcm-highlight-selected-filter: none;
+}
+
+@media screen and (forced-colors: active) {
+  :root {
+    --hcm-highlight-filter: invert(100%);
+  }
+}
+
 :root {
   /* Surfaces */
   --bg-app: #ffffff;

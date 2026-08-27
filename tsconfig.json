@@ -14,5 +14,9 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["src", "vitest.config.ts"]
+  "include": ["src", "vitest.config.ts"],
+  // The tests are not typechecked, matching how they lived in Wilkes.
+  // Bringing them under tsc needs vitest and jest-dom type references
+  // and a pass over what that surfaces; it is not done.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }
