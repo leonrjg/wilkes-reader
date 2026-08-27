@@ -68,7 +68,22 @@ export type { ReaderHostServices, ColorScheme } from "./ReaderHost.js";
 
 // ── Tier 2: headless ────────────────────────────────────────────────────────
 
-export { usePdfDocument, loadPdfDocument, peekCachedPdfDocument } from "./pdfDocumentCache.js";
+export {
+  usePdfDocument,
+  loadPdfDocument,
+  peekCachedPdfDocument,
+  pdfDocumentKey,
+} from "./pdfDocumentCache.js";
+export type { PdfDocumentSource } from "./pdfDocumentCache.js";
+
+/** One page, drawn. The composed readers stack a text layer, a link layer and
+ *  the decoration overlays on this; a host whose surface is a single annotated
+ *  page wants the raster and its own overlay, and would otherwise re-derive the
+ *  device-pixel-ratio handling, the cancellation rules and the canvas release
+ *  from scratch. */
+export { default as PdfPageCanvas } from "./PdfPageCanvas.js";
+export type { RenderedPageGeometry } from "./PdfPageCanvas.js";
+
 export { usePdfPageMetrics, getScaledPageHeight } from "./usePdfPageMetrics.js";
 export type { PdfPageMetric } from "./usePdfPageMetrics.js";
 export { usePdfOutline } from "./usePdfOutline.js";

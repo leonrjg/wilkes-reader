@@ -38,13 +38,31 @@ import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
  * sets its own on the builder's div, which is not a descendant of this element.
  */
 
+/**
+ * The geometry a page was actually drawn with, reported once it is on screen.
+ *
+ * A host that draws its own marks over the canvas -- a highlight, a chunk
+ * rectangle, a measurement -- holds them in PDF user-space units and needs the
+ * number that maps those units onto the pixels below. Deriving it separately
+ * costs a second `getPage` and a second viewport, and leaves the overlay free
+ * to disagree with the raster it sits on. Reported from the render itself, it
+ * cannot.
+ */
+export interface RenderedPageGeometry {
+  /** The page's own size in user-space units, at the rotation it was drawn. */
+  width: number;
+  height: number;
+  /** CSS pixels per user-space unit. */
+  scale: number;
+}
+
 interface PdfPageCanvasProps {
   pdf: PDFDocumentProxy;
   pageNumber: number;
   /** Target CSS width in px. The page is scaled to meet it. */
   width: number;
   canvasBackground?: string;
-  onRenderSuccess?: () => void;
+  onRenderSuccess?: (geometry: RenderedPageGeometry) => void;
   onRenderError?: (error: unknown) => void;
 }
 
@@ -135,7 +153,7 @@ function PageCanvas({
   scale: number;
   rotate: number;
   canvasBackground?: string;
-  onRenderSuccess?: () => void;
+  onRenderSuccess?: (geometry: RenderedPageGeometry) => void;
   onRenderError?: (error: unknown) => void;
 }) {
   const canvasElement = useRef<HTMLCanvasElement>(null);
@@ -176,6 +194,7 @@ function PageCanvas({
       rotation: rotate,
     });
     const viewport = page.getViewport({ scale, rotation: rotate });
+    const base = page.getViewport({ scale: 1, rotation: rotate });
 
     canvas.width = renderViewport.width;
     canvas.height = renderViewport.height;
@@ -197,7 +216,11 @@ function PageCanvas({
     task.promise
       .then(() => {
         canvas.style.visibility = "";
-        callbacksRef.current.onRenderSuccess?.();
+        callbacksRef.current.onRenderSuccess?.({
+          width: base.width,
+          height: base.height,
+          scale,
+        });
       })
       .catch((error: unknown) => {
         // A cancelled render rejects; that is the normal path when the reader

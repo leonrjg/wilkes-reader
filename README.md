@@ -23,7 +23,7 @@ otherwise reimplement document loading and text location badly.
 ### Installing
 
 ```
-npm install github:leonrjg/wilkes-reader#v0.1.0
+npm install github:leonrjg/wilkes-reader#v0.2.0
 ```
 
 `pdfjs-dist`, `react` and `react-dom` are peer dependencies.
@@ -72,6 +72,36 @@ import "@leonrjg/wilkes-reader/testing/setup";
 
 `@leonrjg/wilkes-reader/testing` also exports `renderWithReaderHost`, which
 mounts a reader with a host you can change afterwards, and `stubSelectionSlot`.
+
+Of the three, only the `@source` line is about Tailwind, and only the composed
+readers need it. A host that takes the headless tier alone — `usePdfDocument`,
+`PdfPageCanvas`, the metrics and locator hooks — needs no Tailwind and no
+`reader.css`: nothing in that tier carries a utility class, and the only rule it
+would take from the stylesheet is `.pdf-page canvas`, the sheet-of-paper white
+and its shadow. Import `reader.css` if you want that look, or style the class
+yourself. The other two wirings are not optional for anyone: `pdfjsAssets()`
+because pdf.js fetches its decoders at runtime in every tier, and the test setup
+because every tier imports pdf.js.
+
+### Where a document comes from
+
+`usePdfDocument` and `loadPdfDocument` take a `PdfDocumentSource`, which is
+either a URL string or `{ key, bytes }`:
+
+```ts
+usePdfDocument(convertFileSrc(path));                  // Wilkes: a fetchable URL
+usePdfDocument(bytes && { key: `document:${id}`, bytes }); // Underdog: bytes over IPC
+```
+
+A URL is identity and transport at once, so it stays a bare string. Bytes are
+transport with no identity, so they carry the host's own — a record id, a hash.
+The key is what the document cache stores under, so it must be stable across
+renders even though the object around it is not; without one, every render is a
+cache miss and re-parses the file. `null` is a source too, meaning the bytes have
+not arrived yet, and is not reported as a failed load.
+
+The bytes are copied before pdf.js sees them, because pdf.js detaches the buffer
+it is handed. Your `ArrayBuffer` stays usable.
 
 ### Releasing
 

@@ -208,6 +208,31 @@ describe("PdfPageCanvas", () => {
     expect((wrapper as HTMLElement).style.backgroundColor).toBe("");
   });
 
+  it("reports the geometry it drew, in the units an overlay is held in", async () => {
+    // A host drawing its own marks over the page holds them in PDF user-space
+    // units. Without this it needs a second `getPage` and a second viewport to
+    // find the scale, and nothing keeps that copy agreeing with the raster.
+    const { page, render: renderTask } = makePage({ width: 612, height: 792, rotate: 90 });
+    const onRenderSuccess = vi.fn();
+    render(
+      <PdfPageCanvas
+        pdf={makePdf(page)}
+        pageNumber={1}
+        width={306}
+        onRenderSuccess={onRenderSuccess}
+      />,
+    );
+    await waitFor(() => expect(page.render).toHaveBeenCalled());
+
+    await act(async () => {
+      renderTask.resolve();
+    });
+
+    // The size is the page's own, at the rotation drawn — not the CSS box, and
+    // not the device-resolution backing store.
+    expect(onRenderSuccess).toHaveBeenCalledWith({ width: 612, height: 792, scale: 0.5 });
+  });
+
   it("shows the loading message until the page proxy resolves", async () => {
     const pageProxy = deferred<unknown>();
     const pdf = { getPage: vi.fn(() => pageProxy.promise) } as never;
