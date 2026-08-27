@@ -31,7 +31,11 @@ import {
   type PdfScrollAnchor,
   type PdfScrollPosition,
 } from "./pdfScrollMemory.js";
-import { usePdfDocument } from "./pdfDocumentCache.js";
+import {
+  pdfDocumentKey,
+  usePdfDocument,
+  type PdfDocumentSource,
+} from "./pdfDocumentCache.js";
 import { Tooltip } from "./Tooltip.js";
 import type { DocumentSelection } from "./selection.js";
 import SelectionLayer from "./SelectionLayer.js";
@@ -47,7 +51,16 @@ import type { PdfReaderSlots } from "./slots.js";
 import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.js";
 
 export interface PdfViewerProps {
-  url: string;
+  /** The document to read, and what identifies it.
+   *
+   *  A URL is both at once and stays a bare string. A host that cannot hand
+   *  the webview a fetchable URL -- bytes over an IPC boundary, a file the
+   *  window is deliberately not allowed to name -- supplies `{ key, bytes }`
+   *  instead, and everything this reader keys on the document (its remembered
+   *  scroll position and zoom, its page metrics, whether it has been
+   *  auto-zoomed yet) keys on `pdfDocumentKey(source)` rather than on a
+   *  location it may not have. */
+  source: PdfDocumentSource;
   /** Incremented to retry a failed parse without changing the document URL. */
   loadAttempt?: number;
   page: number;
@@ -91,6 +104,9 @@ export interface PdfReaderHandle extends FindableReaderHandle, ZoomableReaderHan
 }
 
 const PAGE_GAP_PX = 12;
+// A page narrower than this is unreadable, so an over-wide gutter in a narrow
+// pane costs the gutter its full width rather than costing the page the page.
+const MIN_PAGE_WIDTH = 160;
 const PDF_MIN_ZOOM = 0.25;
 const PDF_MAX_ZOOM = 3.0;
 // Keep active find matches away from the very edge of the reader. Besides
@@ -237,7 +253,7 @@ function revealPdfMatch(
 }
 
 export default function PdfViewer({
-  url,
+  source,
   loadAttempt = 0,
   page,
   highlight_bbox,
@@ -253,6 +269,12 @@ export default function PdfViewer({
   const isDark = colorScheme === "dark";
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // What this reader keys the document's own state on. `source` is a fresh
+  // object every render when it carries bytes, so nothing may depend on it
+  // directly; the key is stable for as long as it is the same document, which
+  // is exactly what the scroll memory, the metrics cache and the auto-zoom
+  // guard mean by "the same document".
+  const documentKey = pdfDocumentKey(source);
   const [containerWidth, setContainerWidth] = useState(600);
   const [currentPage, setCurrentPage] = useState(page);
   const prevNavigationTargetRef = useRef<{ page: number; bbox: BoundingBox | null } | null>(null);
@@ -272,10 +294,10 @@ export default function PdfViewer({
   // Restore the reader's last zoom for this document synchronously, so
   // renderedWidth is already correct when the scroll position is restored and
   // auto-zoom (skipped below when a zoom is remembered) never shifts it.
-  const [zoom, setZoom] = useState(() => readPdfScrollPosition(url)?.zoom ?? 1.0);
+  const [zoom, setZoom] = useState(() => readPdfScrollPosition(documentKey)?.zoom ?? 1.0);
   // The parsed document comes from a shared LRU cache (kept alive across
   // unmounts), so navigating back to a recently opened file is instant.
-  const pdf = usePdfDocument(url, loadAttempt, onLoadError);
+  const pdf = usePdfDocument(source, loadAttempt, onLoadError);
   const numPages = pdf?.numPages ?? null;
   const locatedSearchResult = usePdfSearchResult(pdf, page, search_locator);
   const targetPage = locatedSearchResult?.page ?? page;
@@ -287,8 +309,18 @@ export default function PdfViewer({
   const drawnTarget = locatedSearchResult;
   const [isOutlineOpen, setIsOutlineOpen] = useState(false);
 
-  const renderedWidth = containerWidth * zoom;
-  const { pageMetrics, hasPageMetrics } = usePdfPageMetrics(pdf, url);
+  // The canvas is the page *and* the gutter, so the page is drawn into what
+  // is left after the gutter is taken out. Reserving it here rather than
+  // letting the column hang off the page's right edge is what keeps host
+  // chrome inside the scrollable extent at every zoom.
+  const gutter = slots?.pageGutter ?? null;
+  const gutterWidth = gutter ? Math.max(0, gutter.width) : 0;
+  const renderedWidth = Math.max(MIN_PAGE_WIDTH, containerWidth - gutterWidth) * zoom;
+  // What the scroll container actually has to hold, and therefore what a
+  // horizontal scroll position is a fraction *of*. Reading the page's width
+  // for this would drift the zoom recentre by the gutter.
+  const contentWidth = renderedWidth + gutterWidth;
+  const { pageMetrics, hasPageMetrics } = usePdfPageMetrics(pdf, documentKey);
   const outline = usePdfOutline(pdf);
 
   // Preserve the horizontal focal point across a zoom change. Without this the
@@ -302,8 +334,8 @@ export default function PdfViewer({
   // exactly once per document (and never fights a subsequent manual zoom). A
   // remembered zoom means this document was already sized in an earlier mount;
   // pre-mark it so auto-zoom is skipped on reopen and the restored zoom stands.
-  const autoZoomedUrlRef = useRef<string | null>(
-    readPdfScrollPosition(url)?.zoom !== undefined ? url : null,
+  const autoZoomedKeyRef = useRef<string | null>(
+    readPdfScrollPosition(documentKey)?.zoom !== undefined ? documentKey : null,
   );
 
   const setZoomKeepingHorizontalCenter = useCallback(
@@ -314,14 +346,14 @@ export default function PdfViewer({
         // would be applied later on an unrelated resize.
         if (next === zoom) return zoom;
         const container = containerRef.current;
-        if (container && renderedWidth > 0) {
+        if (container && contentWidth > 0) {
           const centerX = container.scrollLeft + container.clientWidth / 2;
-          pendingZoomAnchorRef.current = centerX / renderedWidth;
+          pendingZoomAnchorRef.current = centerX / contentWidth;
         }
         return next;
       });
     },
-    [renderedWidth],
+    [contentWidth],
   );
 
   useLayoutEffect(() => {
@@ -331,8 +363,8 @@ export default function PdfViewer({
     pendingZoomAnchorRef.current = null;
     // Synchronous: renderedWidth (and the page div's width) already updated in
     // this commit, so scrollWidth is grown before paint — no left-edge flash.
-    container.scrollLeft = relativeCenter * renderedWidth - container.clientWidth / 2;
-  }, [renderedWidth]);
+    container.scrollLeft = relativeCenter * contentWidth - container.clientWidth / 2;
+  }, [contentWidth]);
 
   // Auto-zoom a freshly opened document so its body text renders at a
   // comfortable on-screen size. We sample a few pages, take the
@@ -344,7 +376,7 @@ export default function PdfViewer({
   // left at 1.0.
   useEffect(() => {
     if (!pdf || autoZoomTargetPx === undefined) return;
-    if (autoZoomedUrlRef.current === url) return;
+    if (autoZoomedKeyRef.current === documentKey) return;
 
     let cancelled = false;
     (async () => {
@@ -374,7 +406,7 @@ export default function PdfViewer({
       // Mark done only after a full measurement completes. Setting this up front
       // would break under React StrictMode, whose mount/unmount/remount cancels
       // the first pass — the remount would then see the flag and skip measuring.
-      autoZoomedUrlRef.current = url;
+      autoZoomedKeyRef.current = documentKey;
       if (fontSizes.length === 0 || pageWidths.length === 0) return;
 
       const medianPageWidth = median(pageWidths);
@@ -398,7 +430,7 @@ export default function PdfViewer({
     return () => {
       cancelled = true;
     };
-  }, [autoZoomTargetPx, pdf, url]);
+  }, [autoZoomTargetPx, pdf, documentKey]);
 
   const getVirtualPageSize = useCallback(
     (index: number) => {
@@ -669,7 +701,7 @@ export default function PdfViewer({
       // always wins over the remembered position.
       const isInitial = prevTarget === null;
       const isDefaultTarget = targetPage === 1 && targetBbox === null;
-      const remembered = isInitial && isDefaultTarget ? readPdfScrollPosition(url) : null;
+      const remembered = isInitial && isDefaultTarget ? readPdfScrollPosition(documentKey) : null;
       if (remembered) {
         restoreScrollPosition(remembered);
       } else {
@@ -703,7 +735,7 @@ export default function PdfViewer({
     targetBbox,
     isSearchOpen,
     virtualizer,
-    url,
+    documentKey,
     restoreScrollPosition,
     pageMetrics,
     signalInitialRender,
@@ -720,8 +752,8 @@ export default function PdfViewer({
     const container = containerRef.current;
     if (!container) return;
     const pos = captureScrollPosition(container);
-    if (pos) savePdfScrollPosition(url, { ...pos, zoom });
-  }, [url, zoom]);
+    if (pos) savePdfScrollPosition(documentKey, { ...pos, zoom });
+  }, [documentKey, zoom]);
 
   useEffect(
     () => () => {
@@ -896,7 +928,7 @@ export default function PdfViewer({
               async canvas render. This lets the zoom-recentre effect set
               scrollLeft synchronously without the browser clamping it to a
               stale, not-yet-widened maximum. */}
-          <div style={{ paddingTop, paddingBottom, width: `${renderedWidth}px` }}>
+          <div style={{ paddingTop, paddingBottom, width: `${contentWidth}px` }}>
             {virtualItems.map((vItem) => {
               const pageNum = vItem.index + 1;
               const pageMetric = pageMetrics[vItem.index];
@@ -1038,12 +1070,18 @@ export default function PdfViewer({
                           />
                         );
                       })()}
-                    {slots?.pageGutter && (
+                    {gutter && (
                       <div
                         data-page-gutter={pageNum}
-                        style={{ position: "absolute", left: "100%", top: 0, height: pageHeight }}
+                        style={{
+                          position: "absolute",
+                          left: "100%",
+                          top: 0,
+                          width: gutterWidth,
+                          height: pageHeight,
+                        }}
                       >
-                        {slots.pageGutter(pageNum, {
+                        {gutter.render(pageNum, {
                           scale: pageScale,
                           width: renderedWidth,
                           height: pageHeight,

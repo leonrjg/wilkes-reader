@@ -47,6 +47,7 @@ export type {
   ReaderSlots,
   PdfReaderSlots,
   SelectionActionsSlot,
+  PageGutter,
   PageGutterSlot,
   SelectionSlotApi,
 } from "./slots.js";

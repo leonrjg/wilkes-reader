@@ -20,13 +20,29 @@ export type SelectionActionsSlot = (
   api: SelectionSlotApi,
 ) => ReactNode;
 
-/** Host content laid out beside one page, aligned to that page's top-left.
- *  The reader reserves no horizontal space for it: the column is positioned at
- *  the page's right edge and the host sizes its own content. */
+/** Host content laid out beside one page, aligned to that page's top-left. */
 export type PageGutterSlot = (
   page: number,
   ctx: { scale: number; width: number; height: number },
 ) => ReactNode;
+
+/** A column of host content running down the outside of every page.
+ *
+ *  The width is declared rather than left to the content because the reader
+ *  has to *reserve* it: the page is drawn into what is left of the canvas
+ *  after the gutter is taken out, so the two together fill the reader and the
+ *  gutter pads the page instead of hanging off its right edge. A gutter the
+ *  reader did not know the width of could only be positioned outside the
+ *  scrollable extent, where it is clipped, and where zooming the page walks it
+ *  off screen -- which is why the width is part of the declaration and not an
+ *  optional hint beside it. */
+export interface PageGutter {
+  /** CSS px taken out of the canvas for this column, at every zoom. Fixed
+   *  rather than scaled: the column holds host chrome, and chrome that grew
+   *  with the page would leave less room for the page the more you zoomed. */
+  width: number;
+  render: PageGutterSlot;
+}
 
 export interface ReaderSlots {
   selectionActions?: SelectionActionsSlot;
@@ -36,5 +52,5 @@ export interface ReaderSlots {
 }
 
 export interface PdfReaderSlots extends ReaderSlots {
-  pageGutter?: PageGutterSlot;
+  pageGutter?: PageGutter;
 }

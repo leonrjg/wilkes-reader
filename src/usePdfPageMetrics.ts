@@ -10,7 +10,12 @@ export function getScaledPageHeight(metric: PdfPageMetric, renderedWidth: number
   return (metric.height / metric.width) * renderedWidth;
 }
 
-export function usePdfPageMetrics(pdf: PDFDocumentProxy | null, url: string) {
+/** Every page's unscaled size, remeasured when the document changes.
+ *
+ *  `documentKey` is the document's identity ([`pdfDocumentKey`]), not a
+ *  location: a host whose bytes arrive over its own transport has no URL to
+ *  name, and this hook only ever used one as "has the document changed?". */
+export function usePdfPageMetrics(pdf: PDFDocumentProxy | null, documentKey: string) {
   const [pageMetrics, setPageMetrics] = useState<PdfPageMetric[]>([]);
   const [isLoadingPageMetrics, setIsLoadingPageMetrics] = useState(false);
 
@@ -53,7 +58,7 @@ export function usePdfPageMetrics(pdf: PDFDocumentProxy | null, url: string) {
     return () => {
       cancelled = true;
     };
-  }, [pdf, url]);
+  }, [pdf, documentKey]);
 
   return {
     pageMetrics,

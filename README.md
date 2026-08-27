@@ -15,6 +15,15 @@ needs, and nothing app-specific crosses back:
 | `ref` | host → reader | Navigation, zoom and find as imperative commands |
 | `ReaderHostProvider` | host → reader | Capabilities the readers need: opening a URL, the colour scheme |
 
+A `pageGutter` slot declares its own width, and the reader **reserves** it:
+the page is drawn into what is left of the canvas, so host chrome beside a page
+sits inside the scrollable extent and stays there at every zoom, padding the
+page rather than hanging off its right edge.
+
+```ts
+slots={{ pageGutter: { width: 280, render: (page, { scale }) => <Notes … /> } }}
+```
+
 `index.ts` is the whole public surface, in two tiers: the composed readers with
 that contract, and the headless hooks for a host whose reading surface is not a
 reader — an annotated single-page stage, a thumbnail strip — which would
@@ -23,7 +32,7 @@ otherwise reimplement document loading and text location badly.
 ### Installing
 
 ```
-npm install github:leonrjg/wilkes-reader#v0.2.0
+npm install github:leonrjg/wilkes-reader#v0.3.0
 ```
 
 `pdfjs-dist`, `react` and `react-dom` are peer dependencies.
@@ -85,12 +94,14 @@ because every tier imports pdf.js.
 
 ### Where a document comes from
 
-`usePdfDocument` and `loadPdfDocument` take a `PdfDocumentSource`, which is
-either a URL string or `{ key, bytes }`:
+`PdfViewer`, `usePdfDocument` and `loadPdfDocument` all take a
+`PdfDocumentSource`, which is either a URL string or `{ key, bytes }`:
 
 ```ts
 usePdfDocument(convertFileSrc(path));                  // Wilkes: a fetchable URL
 usePdfDocument(bytes && { key: `document:${id}`, bytes }); // Underdog: bytes over IPC
+<PdfViewer source={convertFileSrc(path)} … />
+<PdfViewer source={{ key: `document:${id}`, bytes }} … />
 ```
 
 A URL is identity and transport at once, so it stays a bare string. Bytes are

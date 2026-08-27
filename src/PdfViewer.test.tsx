@@ -119,6 +119,10 @@ vi.mock("./pdfDocumentCache", () => ({
   usePdfDocument: () => mockPdfDoc.value,
   peekCachedPdfDocument: () => mockPdfDoc.value,
   loadPdfDocument: async () => mockPdfDoc.value,
+  // The reader keys the document's own state on this; the real one is a
+  // two-line accessor, so it is kept rather than stubbed to something else.
+  pdfDocumentKey: (source: string | { key: string }) =>
+    typeof source === "string" ? source : source.key,
 }));
 
 // Mock the text-selection overlay; it loads pdf.js' viewer-components bundle,
@@ -218,7 +222,7 @@ function deferAnimationFrames() {
 
 describe("PdfViewer", () => {
   const defaultProps = {
-    url: "test.pdf",
+    source: "test.pdf",
     page: 1,
     highlight_bbox: { x: 10, y: 10, width: 50, height: 20 },
     onRenderSuccess: vi.fn(),
@@ -341,7 +345,7 @@ describe("PdfViewer", () => {
   it("uses the configured auto-zoom target", async () => {
     mockPdfDoc.value = sizedDoc(9, 612);
 
-    render(<PdfViewer {...defaultProps} url="configured-target.pdf" />, {
+    render(<PdfViewer {...defaultProps} source="configured-target.pdf" />, {
       host: { pdfAutoZoomTargetPx: 18 },
     });
     await act(async () => {
@@ -656,15 +660,51 @@ describe("PdfViewer", () => {
     render(
       <PdfViewer
         {...defaultProps}
-        slots={{ pageGutter: (page, { scale }) => <span>{`note ${page} @${scale}`}</span> }}
+        slots={{
+          pageGutter: {
+            width: 150,
+            render: (page, { scale }) => <span>{`note ${page} @${scale}`}</span>,
+          },
+        }}
       />,
     );
 
     const gutters = document.querySelectorAll("[data-page-gutter]");
     expect(gutters).toHaveLength(3);
-    expect(gutters[0]).toHaveTextContent("note 1 @1");
-    // Positioned at the page's right edge, reserving no width of its own.
-    expect(gutters[0]).toHaveStyle({ position: "absolute", left: "100%", top: "0px" });
+    expect(gutters[0]).toHaveStyle({
+      position: "absolute",
+      left: "100%",
+      top: "0px",
+      width: "150px",
+    });
+  });
+
+  it("takes the gutter's width out of the page rather than out of the canvas", async () => {
+    // A 600px pane and a 600pt page render at scale 1 with no gutter. Declaring
+    // a 150px one has to cost the *page* those pixels -- if it cost the canvas
+    // instead, the column would hang outside the scrollable extent, where it is
+    // clipped and where zooming walks it off screen.
+    render(
+      <PdfViewer
+        {...defaultProps}
+        slots={{
+          pageGutter: { width: 150, render: (page, { scale }) => <span>{`note ${page} @${scale}`}</span> },
+        }}
+      />,
+    );
+
+    expect(document.querySelector("[data-page-gutter]")).toHaveTextContent("note 1 @0.75");
+    expect(mockPage).toHaveBeenCalledWith(expect.objectContaining({ width: 450 }));
+    // Page plus gutter is the whole canvas, so nothing overflows it.
+    const content = document.querySelector<HTMLElement>("[data-page-number='1']")!.parentElement!;
+    expect(content).toHaveStyle({ width: "600px" });
+  });
+
+  it("leaves the page the whole canvas when no gutter is declared", async () => {
+    render(<PdfViewer {...defaultProps} />);
+
+    expect(document.querySelector("[data-page-gutter]")).toBeNull();
+    expect(mockPage).toHaveBeenCalledWith(expect.objectContaining({ width: 600 }));
   });
 
   it("renders the toolbar slot inside the reader's control cluster", () => {
@@ -1030,7 +1070,7 @@ describe("PdfViewer", () => {
 
     const onRenderSuccess = vi.fn();
     const { rerender } = render(
-      <PdfViewer url="test.pdf" page={7} highlight_bbox={null} onRenderSuccess={onRenderSuccess} />,
+      <PdfViewer source="test.pdf" page={7} highlight_bbox={null} onRenderSuccess={onRenderSuccess} />,
     );
 
     await act(async () => {
@@ -1048,7 +1088,7 @@ describe("PdfViewer", () => {
     };
 
     rerender(
-      <PdfViewer url="test.pdf" page={7} highlight_bbox={null} onRenderSuccess={onRenderSuccess} />,
+      <PdfViewer source="test.pdf" page={7} highlight_bbox={null} onRenderSuccess={onRenderSuccess} />,
     );
 
     await act(async () => {
@@ -1064,7 +1104,7 @@ describe("PdfViewer", () => {
     // (page 1, no highlight target) must land back on page 3, not page 1.
     savePdfScrollPosition("remembered.pdf", { page: 3, offsetRatio: 0, zoom: 1 });
 
-    render(<PdfViewer url="remembered.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host: defaultHost });
+    render(<PdfViewer source="remembered.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host: defaultHost });
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1083,7 +1123,7 @@ describe("PdfViewer", () => {
     savePdfScrollPosition("zoomed.pdf", { page: 3, offsetRatio: 0, zoom: 1.5 });
     mockPdfDoc.value = sizedDoc(9, 612);
 
-    render(<PdfViewer url="zoomed.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host: defaultHost });
+    render(<PdfViewer source="zoomed.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host: defaultHost });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
@@ -1113,7 +1153,7 @@ describe("PdfViewer", () => {
 
     const onRenderSuccess = vi.fn();
     render(
-      <PdfViewer url="deep.pdf" page={1} highlight_bbox={null} onRenderSuccess={onRenderSuccess} />,
+      <PdfViewer source="deep.pdf" page={1} highlight_bbox={null} onRenderSuccess={onRenderSuccess} />,
     );
 
     await act(async () => {
@@ -1130,7 +1170,7 @@ describe("PdfViewer", () => {
 
     render(
       <PdfViewer
-        url="explicit.pdf"
+        source="explicit.pdf"
         page={2}
         highlight_bbox={{ x: 1, y: 1, width: 2, height: 2 }}
         onRenderSuccess={vi.fn()}
