@@ -23,25 +23,25 @@
 
 // ── Tier 1: composed readers ────────────────────────────────────────────────
 
-export { default as PdfViewer } from "./PdfViewer";
-export type { PdfViewerProps, PdfReaderHandle, PdfSelection } from "./PdfViewer";
+export { default as PdfViewer } from "./PdfViewer.js";
+export type { PdfViewerProps, PdfReaderHandle, PdfSelection } from "./PdfViewer.js";
 
-export { default as MarkdownViewer } from "./MarkdownViewer";
-export type { MarkdownViewerProps, MarkdownReaderHandle } from "./MarkdownViewer";
+export { default as MarkdownViewer } from "./MarkdownViewer.js";
+export type { MarkdownViewerProps, MarkdownReaderHandle } from "./MarkdownViewer.js";
 
-export { default as CodeViewer, getLanguageExtension } from "./CodeViewer";
-export type { CodeViewerProps, CodeReaderHandle } from "./CodeViewer";
+export { default as CodeViewer, getLanguageExtension } from "./CodeViewer.js";
+export type { CodeViewerProps, CodeReaderHandle } from "./CodeViewer.js";
 
 // ── The contract ────────────────────────────────────────────────────────────
 
-export { elementAnchor, rectDecorationsForPage, rangeDecorations, unionBox } from "./decorations";
+export { elementAnchor, rectDecorationsForPage, rangeDecorations, unionBox } from "./decorations.js";
 export type {
   Decoration,
   DecorationAnchor,
   DecorationRenderContext,
   DecorationActivateHandler,
   ElementAnchor,
-} from "./decorations";
+} from "./decorations.js";
 
 export type {
   ReaderSlots,
@@ -49,49 +49,49 @@ export type {
   SelectionActionsSlot,
   PageGutterSlot,
   SelectionSlotApi,
-} from "./slots";
+} from "./slots.js";
 
-export type { ReaderHandle, FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle";
+export type { ReaderHandle, FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.js";
 
-export type { DocumentSelection, PositionedSelection } from "./selection";
+export type { DocumentSelection, PositionedSelection } from "./selection.js";
 
-export type { BoundingBox, ByteRange, SourceOrigin } from "./documentCoordinates";
+export type { BoundingBox, ByteRange, SourceOrigin } from "./documentCoordinates.js";
 
 /** A leaf primitive the readers need and both applications use. It lives here
  *  because the PDF link preview depends on its `interactive` and `size`
  *  behaviour, so it is reader functionality rather than host chrome; shipping
  *  it from one place is what stops the two copies drifting. */
-export { Tooltip } from "./Tooltip";
+export { Tooltip } from "./Tooltip.js";
 
-export { ReaderHostProvider, useReaderHost } from "./ReaderHost";
-export type { ReaderHostServices, ColorScheme } from "./ReaderHost";
+export { ReaderHostProvider, useReaderHost } from "./ReaderHost.js";
+export type { ReaderHostServices, ColorScheme } from "./ReaderHost.js";
 
 // ── Tier 2: headless ────────────────────────────────────────────────────────
 
-export { usePdfDocument, loadPdfDocument, peekCachedPdfDocument } from "./pdfDocumentCache";
-export { usePdfPageMetrics, getScaledPageHeight } from "./usePdfPageMetrics";
-export type { PdfPageMetric } from "./usePdfPageMetrics";
-export { usePdfOutline } from "./usePdfOutline";
-export type { PdfOutlineNode } from "./usePdfOutline";
-export { usePdfInnerSearch } from "./usePdfInnerSearch";
-export type { InnerMatch } from "./usePdfInnerSearch";
-export { useDocumentFind } from "./useDocumentFind";
-export type { DocumentFind } from "./useDocumentFind";
-export { resolveDestination } from "./pdfDestinations";
-export type { PdfDestination, ResolvedDestination } from "./pdfDestinations";
+export { usePdfDocument, loadPdfDocument, peekCachedPdfDocument } from "./pdfDocumentCache.js";
+export { usePdfPageMetrics, getScaledPageHeight } from "./usePdfPageMetrics.js";
+export type { PdfPageMetric } from "./usePdfPageMetrics.js";
+export { usePdfOutline } from "./usePdfOutline.js";
+export type { PdfOutlineNode } from "./usePdfOutline.js";
+export { usePdfInnerSearch } from "./usePdfInnerSearch.js";
+export type { InnerMatch } from "./usePdfInnerSearch.js";
+export { useDocumentFind } from "./useDocumentFind.js";
+export type { DocumentFind } from "./useDocumentFind.js";
+export { resolveDestination } from "./pdfDestinations.js";
+export type { PdfDestination, ResolvedDestination } from "./pdfDestinations.js";
 export {
   findAllPdfTextMatches,
   findPdfTextMatchesOnPage,
   locatePdfSearchResult,
-} from "./pdfTextLocator";
-export type { PdfSearchLocator, PdfTextMatch } from "./pdfTextLocator";
+} from "./pdfTextLocator.js";
+export type { PdfSearchLocator, PdfTextMatch } from "./pdfTextLocator.js";
 export {
   utf8ByteOffsetToUtf16Offset,
   utf8ByteRangeToUtf16Range,
   textSelectionFromUtf16Range,
-} from "./textOffsets";
+} from "./textOffsets.js";
 
 /** Which surface a text document was last read on. The readers persist and
  *  restore the scroll position per mode; a host that offers the choice needs
  *  the vocabulary. */
-export type { TextViewerMode } from "./textScrollMemory";
+export type { TextViewerMode } from "./textScrollMemory.js";

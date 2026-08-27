@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { pdfjsAssets } from "./pdfjsAssets";
-import { pdfjsAssetUrls } from "../pdfjsAssetUrls";
+import { pdfjsAssets } from "./pdfjsAssets.js";
+import { pdfjsAssetUrls } from "../pdfjsAssetUrls.js";
 
 /** The emitted assets, keyed by the path they are published under. */
 function emittedFiles() {

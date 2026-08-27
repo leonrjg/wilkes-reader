@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PositionedPdfText } from "./pdfTextContent";
+import type { PositionedPdfText } from "./pdfTextContent.js";
 import {
   findPdfTextMatchesInItems,
   locatePdfSearchResult,
-} from "./pdfTextLocator";
+} from "./pdfTextLocator.js";
 
 function item(
   text: string,

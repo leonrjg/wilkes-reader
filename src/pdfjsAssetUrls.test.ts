@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pdfjsAssetUrls } from "./pdfjsAssetUrls";
+import { pdfjsAssetUrls } from "./pdfjsAssetUrls.js";
 
 describe("pdfjsAssetUrls", () => {
   it("names every directory pdf.js fetches from at runtime", () => {

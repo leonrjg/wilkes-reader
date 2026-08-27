@@ -1,6 +1,6 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import PdfLinkLayer from "./PdfLinkLayer";
+import PdfLinkLayer from "./PdfLinkLayer.js";
 
 const { mockGetPdfLinkPreview } = vi.hoisted(() => ({
   mockGetPdfLinkPreview: vi.fn(),

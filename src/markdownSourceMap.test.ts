@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderedBoundaries, sourceBoundaryForDomPoint, sourceMappedMarkdown } from "./markdownSourceMap";
+import { renderedBoundaries, sourceBoundaryForDomPoint, sourceMappedMarkdown } from "./markdownSourceMap.js";
 
 interface TreeNode {
   type: string;

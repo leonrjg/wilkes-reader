@@ -1,7 +1,7 @@
 import { X } from "react-feather";
-import type { PdfOutlineNode } from "./usePdfOutline";
-import type { PdfDestination } from "./pdfDestinations";
-import { Tooltip } from "./Tooltip";
+import type { PdfOutlineNode } from "./usePdfOutline.js";
+import type { PdfDestination } from "./pdfDestinations.js";
+import { Tooltip } from "./Tooltip.js";
 
 interface Props {
   outline: PdfOutlineNode[];

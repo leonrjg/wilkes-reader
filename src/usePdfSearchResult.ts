@@ -4,7 +4,7 @@ import {
   locatePdfSearchResult,
   type PdfSearchLocator,
   type PdfTextMatch,
-} from "./pdfTextLocator";
+} from "./pdfTextLocator.js";
 
 /** Resolve a coarse indexed PDF origin to rendered PDF.js page geometry. */
 export function usePdfSearchResult(

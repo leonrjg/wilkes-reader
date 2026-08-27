@@ -1,5 +1,5 @@
-import type { ByteRange } from "./documentCoordinates";
-import type { DocumentSelection } from "./selection";
+import type { ByteRange } from "./documentCoordinates.js";
+import type { DocumentSelection } from "./selection.js";
 
 const encoder = new TextEncoder();
 

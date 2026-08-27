@@ -1,7 +1,7 @@
 import { screen, act, fireEvent } from "@testing-library/react";
-import { renderWithReaderHost as render } from "./testing/readerHarness";
+import { renderWithReaderHost as render } from "./testing/readerHarness.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import CodeViewer from "./CodeViewer";
+import CodeViewer from "./CodeViewer.js";
 import { EditorView } from "@codemirror/view";
 
 const { viewBuilds } = vi.hoisted(() => ({ viewBuilds: { count: 0, lastExtensions: [] as unknown[] } }));

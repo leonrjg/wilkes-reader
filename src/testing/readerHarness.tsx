@@ -6,9 +6,9 @@ import {
   type RenderResult,
 } from "@testing-library/react";
 import { vi, type Mock } from "vitest";
-import { ReaderHostProvider, type ReaderHostServices } from "../ReaderHost";
-import type { DocumentSelection } from "../selection";
-import type { SelectionActionsSlot } from "../slots";
+import { ReaderHostProvider, type ReaderHostServices } from "../ReaderHost.js";
+import type { DocumentSelection } from "../selection.js";
+import type { SelectionActionsSlot } from "../slots.js";
 
 /** The one capability the readers ask a host to perform. */
 export const openExternalSpy: Mock = vi.fn();

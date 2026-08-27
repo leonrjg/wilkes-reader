@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readTextScrollPosition, saveTextScrollPosition } from "./textScrollMemory";
+import { readTextScrollPosition, saveTextScrollPosition } from "./textScrollMemory.js";
 
 describe("textScrollMemory", () => {
   it("keeps source and rendered positions independent", () => {

@@ -9,14 +9,14 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ByteRange } from "./documentCoordinates";
-import type { DocumentSelection } from "./selection";
-import SelectionLayer from "./SelectionLayer";
-import FindBar from "./FindBar";
-import ZoomControls, { ZOOM_STEP } from "./ZoomControls";
-import { useDocumentFind } from "./useDocumentFind";
-import { useMarkdownFind } from "./useMarkdownFind";
-import { sourceBoundaryForDomPoint, sourceMappedMarkdown, type TextAnnotation } from "./markdownSourceMap";
+import type { ByteRange } from "./documentCoordinates.js";
+import type { DocumentSelection } from "./selection.js";
+import SelectionLayer from "./SelectionLayer.js";
+import FindBar from "./FindBar.js";
+import ZoomControls, { ZOOM_STEP } from "./ZoomControls.js";
+import { useDocumentFind } from "./useDocumentFind.js";
+import { useMarkdownFind } from "./useMarkdownFind.js";
+import { sourceBoundaryForDomPoint, sourceMappedMarkdown, type TextAnnotation } from "./markdownSourceMap.js";
 import {
   readTextScrollPosition,
   saveTextScrollPosition,
@@ -24,12 +24,12 @@ import {
   saveMarkdownZoom,
   MARKDOWN_MIN_ZOOM,
   MARKDOWN_MAX_ZOOM,
-} from "./textScrollMemory";
-import { utf8ByteOffsetToUtf16Offset } from "./textOffsets";
-import { useDomDocumentSelection } from "./useDomDocumentSelection";
-import { elementAnchor, rangeDecorations, type Decoration } from "./decorations";
-import type { ReaderSlots } from "./slots";
-import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle";
+} from "./textScrollMemory.js";
+import { utf8ByteOffsetToUtf16Offset } from "./textOffsets.js";
+import { useDomDocumentSelection } from "./useDomDocumentSelection.js";
+import { elementAnchor, rangeDecorations, type Decoration } from "./decorations.js";
+import type { ReaderSlots } from "./slots.js";
+import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.js";
 
 /** The reader's own emphasis for the navigation target. Kept distinct from the
  *  host's decorations: where a document opens is the reader's business. */

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from "react";
-import type { SelectionSlotApi } from "./slots";
+import type { SelectionSlotApi } from "./slots.js";
 
 /**
  * The reader half of the selection slot: dismissal and pinning.

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
-import { attachWebkitMarginSelection } from "./pdfWebkitSelection";
+import { attachWebkitMarginSelection } from "./pdfWebkitSelection.js";
 
 // pdf.js' viewer-components build (`web/pdf_viewer.mjs`) reads the core library
 // off `globalThis.pdfjsLib` at module-evaluation time. We must publish it there

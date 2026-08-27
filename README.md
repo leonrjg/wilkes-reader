@@ -1,8 +1,8 @@
-## wilkes-reader
+## wilkes-reader (lib)
 
 Document readers — PDF, Markdown and source - used by [Wilkes](https://github.com/leonrjg/Wilkes).
 
-## What a host provides, and what it gets
+### What a host provides, and what it gets
 
 The readers know how to render a document. They know nothing about bookmarks,
 chat, review state or search backends. Four channels carry everything a host
@@ -20,7 +20,7 @@ that contract, and the headless hooks for a host whose reading surface is not a
 reader — an annotated single-page stage, a thumbnail strip — which would
 otherwise reimplement document loading and text location badly.
 
-## Installing
+### Installing
 
 ```
 npm install github:leonrjg/wilkes-reader#v0.1.0
@@ -41,7 +41,7 @@ cd ../Wilkes/ui && npm link @leonrjg/wilkes-reader
 path, outside the application's root, so the application's dev server needs
 that path in `server.fs.allow` or it will refuse to serve pdf.js' worker.
 
-## Wiring it into a Vite application
+### Wiring it into a Vite application
 
 Three things beyond the import, all of them easy to forget and quiet when
 missed:
@@ -73,20 +73,20 @@ import "@leonrjg/wilkes-reader/testing/setup";
 `@leonrjg/wilkes-reader/testing` also exports `renderWithReaderHost`, which
 mounts a reader with a host you can change afterwards, and `stubSelectionSlot`.
 
-## Releasing
+### Releasing
 
 ```
 git tag vX.Y.Z && git push --tags
 ```
 
-## Theming
+### Theming
 
 `reader.css` defines a light-only `:root` of defaults so the readers render
 correctly with no host palette at all. A host overrides those tokens; dark mode
 is a host decision, delivered through `colorScheme` on the provider rather than
 inferred from a class the readers cannot see.
 
-## Bumping pdf.js
+### Bumping pdf.js
 
 `src/pdfTextLayer.css` is a verbatim copy of pdf.js' own text-layer
 stylesheet, which pdf.js publishes only inside its whole viewer application's

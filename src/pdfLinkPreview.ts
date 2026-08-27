@@ -1,8 +1,8 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { resolveDestination, type PdfDestination } from "./pdfDestinations";
-import { loadPdfPageText, type PositionedPdfText } from "./pdfTextContent";
+import { resolveDestination, type PdfDestination } from "./pdfDestinations.js";
+import { loadPdfPageText, type PositionedPdfText } from "./pdfTextContent.js";
 
-export type { PositionedPdfText } from "./pdfTextContent";
+export type { PositionedPdfText } from "./pdfTextContent.js";
 
 export interface PdfLinkPreview {
   pageNumber: number;

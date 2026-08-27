@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AnnotationMode } from "pdfjs-dist";
-import PdfPageCanvas from "./PdfPageCanvas";
+import PdfPageCanvas from "./PdfPageCanvas.js";
 
 /**
  * These tests exist because this component replaced react-pdf's `<Page>`, and

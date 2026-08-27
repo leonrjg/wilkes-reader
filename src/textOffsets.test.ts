@@ -4,7 +4,7 @@ import {
   utf8ByteOffsetToUtf16Offset,
   utf8ByteRangeToUtf16Range,
   textSelectionFromUtf16Range,
-} from "./textOffsets";
+} from "./textOffsets.js";
 
 describe("text offset conversion", () => {
   const text = "aé🙂z";

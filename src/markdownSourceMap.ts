@@ -1,4 +1,4 @@
-import type { ByteRange } from "./documentCoordinates";
+import type { ByteRange } from "./documentCoordinates.js";
 
 /** A byte range the rendered markdown should mark up.
  *

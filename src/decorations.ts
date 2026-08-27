@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { BoundingBox, ByteRange } from "./documentCoordinates";
+import type { BoundingBox, ByteRange } from "./documentCoordinates.js";
 
 /** Where a decoration attaches to the document.
  *

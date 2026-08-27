@@ -1,4 +1,4 @@
-import type { BoundingBox, ByteRange, SourceOrigin } from "./documentCoordinates";
+import type { BoundingBox, ByteRange, SourceOrigin } from "./documentCoordinates.js";
 
 /** A run of text the reader resolved back to document coordinates.
  *

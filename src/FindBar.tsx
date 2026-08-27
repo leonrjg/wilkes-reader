@@ -1,5 +1,5 @@
 import { Search as SearchIcon, ChevronUp, ChevronDown, X } from "react-feather";
-import type { DocumentFind } from "./useDocumentFind";
+import type { DocumentFind } from "./useDocumentFind.js";
 
 interface FindBarProps {
   find: DocumentFind;

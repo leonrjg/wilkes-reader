@@ -1,6 +1,6 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useDocumentFind } from "./useDocumentFind";
+import { useDocumentFind } from "./useDocumentFind.js";
 
 describe("useDocumentFind", () => {
   beforeEach(() => {

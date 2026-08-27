@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { resolveDestination } from "./pdfDestinations";
+import { resolveDestination } from "./pdfDestinations.js";
 
 function makePdf(overrides: Record<string, unknown> = {}) {
   return {

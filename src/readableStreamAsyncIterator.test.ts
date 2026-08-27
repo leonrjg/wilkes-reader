@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installReadableStreamAsyncIterator } from "./readableStreamAsyncIterator";
+import { installReadableStreamAsyncIterator } from "./readableStreamAsyncIterator.js";
 
 const ASYNC_ITERATOR = Symbol.asyncIterator;
 const original = Object.getOwnPropertyDescriptor(

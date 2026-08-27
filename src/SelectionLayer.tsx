@@ -1,5 +1,5 @@
-import type { PositionedSelection } from "./selection";
-import type { SelectionActionsSlot, SelectionSlotApi } from "./slots";
+import type { PositionedSelection } from "./selection.js";
+import type { SelectionActionsSlot, SelectionSlotApi } from "./slots.js";
 
 /**
  * Positions whatever the host put in the `selectionActions` slot against the

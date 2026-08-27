@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
-import type { DocumentSelection, PositionedSelection } from "./selection";
-import { useSelectionSlot } from "./selectionSlot";
+import type { DocumentSelection, PositionedSelection } from "./selection.js";
+import { useSelectionSlot } from "./selectionSlot.js";
 
 interface Options {
   rootRef: RefObject<HTMLElement | null>;

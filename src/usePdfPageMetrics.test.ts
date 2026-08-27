@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { getScaledPageHeight, usePdfPageMetrics } from "./usePdfPageMetrics";
+import { getScaledPageHeight, usePdfPageMetrics } from "./usePdfPageMetrics.js";
 
 describe("usePdfPageMetrics", () => {
   it("loads intrinsic metrics for every page in a PDF", async () => {

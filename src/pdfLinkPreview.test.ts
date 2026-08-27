@@ -3,7 +3,7 @@ import {
   extractTextBlockAtDestination,
   getPdfLinkPreview,
   type PositionedPdfText,
-} from "./pdfLinkPreview";
+} from "./pdfLinkPreview.js";
 
 function line(
   text: string,

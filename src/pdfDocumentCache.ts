@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getDocument } from "pdfjs-dist";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
-import { pdfjsAssetUrls } from "./pdfjsAssetUrls";
+import { pdfjsAssetUrls } from "./pdfjsAssetUrls.js";
 
 // The parsed PDF documents (`PDFDocumentProxy`) for the N most-recently opened
 // files are kept alive here so switching back to a recent document is instant.

@@ -11,41 +11,41 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Search as SearchIcon, List } from "react-feather";
 import { GlobalWorkerOptions } from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { installReadableStreamAsyncIterator } from "./readableStreamAsyncIterator";
-import PdfPageCanvas from "./PdfPageCanvas";
-import type { BoundingBox } from "./documentCoordinates";
-import { usePdfInnerSearch, type InnerMatch } from "./usePdfInnerSearch";
-import { usePdfSearchResult } from "./usePdfSearchResult";
-import type { PdfSearchLocator } from "./pdfTextLocator";
-import { useDocumentFind } from "./useDocumentFind";
-import FindBar from "./FindBar";
-import ZoomControls, { ZOOM_STEP } from "./ZoomControls";
-import { getScaledPageHeight, usePdfPageMetrics } from "./usePdfPageMetrics";
-import PdfTextLayer from "./PdfTextLayer";
-import PdfLinkLayer from "./PdfLinkLayer";
-import PdfOutline from "./PdfOutline";
-import { usePdfOutline } from "./usePdfOutline";
-import { resolveDestination, type PdfDestination } from "./pdfDestinations";
+import { installReadableStreamAsyncIterator } from "./readableStreamAsyncIterator.js";
+import PdfPageCanvas from "./PdfPageCanvas.js";
+import type { BoundingBox } from "./documentCoordinates.js";
+import { usePdfInnerSearch, type InnerMatch } from "./usePdfInnerSearch.js";
+import { usePdfSearchResult } from "./usePdfSearchResult.js";
+import type { PdfSearchLocator } from "./pdfTextLocator.js";
+import { useDocumentFind } from "./useDocumentFind.js";
+import FindBar from "./FindBar.js";
+import ZoomControls, { ZOOM_STEP } from "./ZoomControls.js";
+import { getScaledPageHeight, usePdfPageMetrics } from "./usePdfPageMetrics.js";
+import PdfTextLayer from "./PdfTextLayer.js";
+import PdfLinkLayer from "./PdfLinkLayer.js";
+import PdfOutline from "./PdfOutline.js";
+import { usePdfOutline } from "./usePdfOutline.js";
+import { resolveDestination, type PdfDestination } from "./pdfDestinations.js";
 import {
   readPdfScrollPosition,
   savePdfScrollPosition,
   type PdfScrollAnchor,
   type PdfScrollPosition,
-} from "./pdfScrollMemory";
-import { usePdfDocument } from "./pdfDocumentCache";
-import { Tooltip } from "./Tooltip";
-import type { DocumentSelection } from "./selection";
-import SelectionLayer from "./SelectionLayer";
-import { useDomDocumentSelection } from "./useDomDocumentSelection";
-import { useReaderHost } from "./ReaderHost";
+} from "./pdfScrollMemory.js";
+import { usePdfDocument } from "./pdfDocumentCache.js";
+import { Tooltip } from "./Tooltip.js";
+import type { DocumentSelection } from "./selection.js";
+import SelectionLayer from "./SelectionLayer.js";
+import { useDomDocumentSelection } from "./useDomDocumentSelection.js";
+import { useReaderHost } from "./ReaderHost.js";
 import {
   elementAnchor,
   rectDecorationsForPage,
   unionBox,
   type Decoration,
-} from "./decorations";
-import type { PdfReaderSlots } from "./slots";
-import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle";
+} from "./decorations.js";
+import type { PdfReaderSlots } from "./slots.js";
+import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.js";
 
 GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",

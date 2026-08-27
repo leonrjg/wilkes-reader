@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { usePdfOutline } from "./usePdfOutline";
+import { usePdfOutline } from "./usePdfOutline.js";
 
 function makePdf(getOutline: () => Promise<unknown>) {
   return { getOutline: vi.fn(getOutline) } as never;

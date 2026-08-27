@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Tooltip } from "./Tooltip";
+import { Tooltip } from "./Tooltip.js";
 
 describe("Tooltip", () => {
   afterEach(() => vi.useRealTimers());

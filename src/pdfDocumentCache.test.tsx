@@ -1,8 +1,8 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDocument } from "pdfjs-dist";
-import { usePdfDocument } from "./pdfDocumentCache";
-import { pdfjsAssetUrls } from "./pdfjsAssetUrls";
+import { usePdfDocument } from "./pdfDocumentCache.js";
+import { pdfjsAssetUrls } from "./pdfjsAssetUrls.js";
 
 vi.mock("pdfjs-dist", () => ({
   getDocument: vi.fn(),

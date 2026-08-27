@@ -1,6 +1,6 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { BoundingBox } from "./documentCoordinates";
-import { loadPdfPageText, type PositionedPdfText } from "./pdfTextContent";
+import type { BoundingBox } from "./documentCoordinates.js";
+import { loadPdfPageText, type PositionedPdfText } from "./pdfTextContent.js";
 
 const WRAP_HYPHEN = "\ue000";
 const LITERAL_ESCAPE = "\ue001";

@@ -1,9 +1,9 @@
 import { screen, fireEvent, act, waitFor } from "@testing-library/react";
-import { renderWithReaderHost as render, stubSelectionSlot } from "./testing/readerHarness";
+import { renderWithReaderHost as render, stubSelectionSlot } from "./testing/readerHarness.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRef, StrictMode } from "react";
-import PdfViewer, { type PdfReaderHandle } from "./PdfViewer";
-import { savePdfScrollPosition } from "./pdfScrollMemory";
+import PdfViewer, { type PdfReaderHandle } from "./PdfViewer.js";
+import { savePdfScrollPosition } from "./pdfScrollMemory.js";
 
 const { mockVirtualizer } = vi.hoisted(() => ({
   mockVirtualizer: {

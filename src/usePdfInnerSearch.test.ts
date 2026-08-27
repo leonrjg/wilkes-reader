@@ -1,6 +1,6 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { usePdfInnerSearch } from "./usePdfInnerSearch";
+import { usePdfInnerSearch } from "./usePdfInnerSearch.js";
 
 describe("usePdfInnerSearch", () => {
   let mockPdf: { numPages: number; getPage: ReturnType<typeof vi.fn> };

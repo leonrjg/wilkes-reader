@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { PdfDestination } from "./pdfDestinations";
+import type { PdfDestination } from "./pdfDestinations.js";
 import {
   getPdfLinkPreview,
   type PdfLinkPreview,
-} from "./pdfLinkPreview";
-import { Tooltip } from "./Tooltip";
+} from "./pdfLinkPreview.js";
+import { Tooltip } from "./Tooltip.js";
 
 interface LinkRect {
   key: string;

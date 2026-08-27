@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import PdfOutline from "./PdfOutline";
-import type { PdfOutlineNode } from "./usePdfOutline";
+import PdfOutline from "./PdfOutline.js";
+import type { PdfOutlineNode } from "./usePdfOutline.js";
 
 const outline: PdfOutlineNode[] = [
   {

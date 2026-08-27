@@ -17,16 +17,16 @@ import { cpp } from "@codemirror/lang-cpp";
 import { java } from "@codemirror/lang-java";
 import { go } from "@codemirror/lang-go";
 import { yaml } from "@codemirror/lang-yaml";
-import type { PositionedSelection } from "./selection";
-import SelectionLayer from "./SelectionLayer";
-import { useSelectionSlot } from "./selectionSlot";
-import { textSelectionFromUtf16Range, utf8ByteRangeToUtf16Range } from "./textOffsets";
-import { readTextScrollPosition, saveTextScrollPosition } from "./textScrollMemory";
+import type { PositionedSelection } from "./selection.js";
+import SelectionLayer from "./SelectionLayer.js";
+import { useSelectionSlot } from "./selectionSlot.js";
+import { textSelectionFromUtf16Range, utf8ByteRangeToUtf16Range } from "./textOffsets.js";
+import { readTextScrollPosition, saveTextScrollPosition } from "./textScrollMemory.js";
 // `Decoration` is CodeMirror's here; the reader contract's is aliased.
-import { elementAnchor, rangeDecorations, type Decoration as ReaderDecoration } from "./decorations";
-import type { ReaderSlots } from "./slots";
-import type { ReaderHandle } from "./readerHandle";
-import { useReaderHost } from "./ReaderHost";
+import { elementAnchor, rangeDecorations, type Decoration as ReaderDecoration } from "./decorations.js";
+import type { ReaderSlots } from "./slots.js";
+import type { ReaderHandle } from "./readerHandle.js";
+import { useReaderHost } from "./ReaderHost.js";
 
 // ── Highlight effect / field ──────────────────────────────────────────────────
 
