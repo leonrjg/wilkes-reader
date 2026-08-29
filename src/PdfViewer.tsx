@@ -3,6 +3,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type Ref,
@@ -47,6 +48,7 @@ import {
   unionBox,
   type Decoration,
 } from "./decorations.js";
+import type { TextSubstitution } from "./pdfTextSubstitution.js";
 import type { PdfReaderSlots } from "./slots.js";
 import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.js";
 
@@ -75,6 +77,14 @@ export interface PdfViewerProps {
    *  placeable here; `range` anchors belong to the text readers and are
    *  ignored, so one list can be handed to whichever reader is mounted. */
   decorations?: Decoration[];
+  /** Areas whose text the host's reading owns rather than the page's glyphs.
+   *
+   *  The reader makes each one the selectable text of its area, so a selection
+   *  that crosses it -- and therefore a copy, and the quote handed to
+   *  `slots.selectionActions` -- carries the reading's account of it instead of
+   *  the run the page drew. The canvas is untouched, and so is find-in-page:
+   *  searching the page is a question about what is drawn. */
+  textSubstitutions?: TextSubstitution[];
   slots?: PdfReaderSlots;
   /** Imperative control — navigation, zoom and find as commands. */
   ref?: Ref<PdfReaderHandle>;
@@ -259,6 +269,7 @@ export default function PdfViewer({
   highlight_bbox,
   search_locator = null,
   decorations = [],
+  textSubstitutions,
   slots,
   ref,
   onRenderSuccess,
@@ -275,6 +286,18 @@ export default function PdfViewer({
   // is exactly what the scroll memory, the metrics cache and the auto-zoom
   // guard mean by "the same document".
   const documentKey = pdfDocumentKey(source);
+  // Grouped once per list, not once per page render: the text layer rebuilds
+  // whenever its substitutions change identity, so a fresh array per render
+  // would rebuild every mounted page on every render of this component.
+  const substitutionsByPage = useMemo(() => {
+    const byPage = new Map<number, TextSubstitution[]>();
+    for (const substitution of textSubstitutions ?? []) {
+      const existing = byPage.get(substitution.page);
+      if (existing) existing.push(substitution);
+      else byPage.set(substitution.page, [substitution]);
+    }
+    return byPage;
+  }, [textSubstitutions]);
   const [containerWidth, setContainerWidth] = useState(600);
   const [currentPage, setCurrentPage] = useState(page);
   const prevNavigationTargetRef = useRef<{ page: number; bbox: BoundingBox | null } | null>(null);
@@ -996,7 +1019,12 @@ export default function PdfViewer({
                       />
                     )}
                     {pdf && (
-                      <PdfTextLayer pdf={pdf} pageNumber={pageNum} scale={pageScale} />
+                      <PdfTextLayer
+                        pdf={pdf}
+                        pageNumber={pageNum}
+                        scale={pageScale}
+                        substitutions={substitutionsByPage.get(pageNum)}
+                      />
                     )}
                     {pdf && (
                       <PdfLinkLayer

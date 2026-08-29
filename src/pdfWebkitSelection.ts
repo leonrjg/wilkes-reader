@@ -12,6 +12,8 @@
 // this augments pdf.js' mechanism for the one case WebKit breaks, rather than
 // replacing it. No-op on every non-WebKit engine.
 
+import { SUBSTITUTED_ATTRIBUTE } from "./pdfTextSubstitution.js";
+
 const IS_WEBKIT =
   typeof navigator !== "undefined" &&
   /AppleWebKit/.test(navigator.userAgent) &&
@@ -24,6 +26,24 @@ function textNodeOf(span: Element): Text | null {
   return n && n.nodeType === Node.TEXT_NODE ? (n as Text) : null;
 }
 
+/**
+ * Snap a caret that landed inside a substituted area to one of its ends.
+ *
+ * `user-select: all` says such an area is indivisible, and the browser honours
+ * it for selections the user drags. This path does not go through the browser:
+ * it builds ranges with `setBaseAndExtent`, which ignores `user-select`. Left
+ * alone it would cut the area's text at an offset with no meaning -- there is
+ * no correspondence between a character of the reading's account of an area and
+ * the glyphs painted under it -- so the caret goes to whichever end it is
+ * nearer, exactly as this module already does when snapping in from whitespace.
+ */
+function atomizeCaret(caret: Caret, x: number): Caret {
+  const span = caret.node.parentElement;
+  if (!span?.hasAttribute(SUBSTITUTED_ATTRIBUTE)) return caret;
+  const rect = span.getBoundingClientRect();
+  return { node: caret.node, offset: x < rect.left + rect.width / 2 ? 0 : caret.node.length };
+}
+
 /** Nearest caret to a point, snapping to a real text span (never endOfContent). */
 function caretAtPoint(x: number, y: number, spans: Element[]): Caret | null {
   // Native hit-test is accurate when the point is over an actual glyph.
@@ -33,7 +53,10 @@ function caretAtPoint(x: number, y: number, spans: Element[]): Caret | null {
     range.startContainer.nodeType === Node.TEXT_NODE &&
     (range.startContainer.parentElement?.closest(".textLayer"))
   ) {
-    return { node: range.startContainer as Text, offset: range.startOffset };
+    return atomizeCaret(
+      { node: range.startContainer as Text, offset: range.startOffset },
+      x,
+    );
   }
   // Whitespace/margin: snap to the nearest span by squared edge-distance.
   let best: Element | null = null;

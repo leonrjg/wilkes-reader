@@ -56,6 +56,12 @@ export type { ReaderHandle, FindableReaderHandle, ZoomableReaderHandle } from ".
 
 export type { DocumentSelection, PositionedSelection } from "./selection.js";
 
+/** What a host's reading says a page area holds, in place of the glyphs the
+ *  page draws there. Part of the contract because only a host can know it: it
+ *  is a fact that host's extraction settled, and nothing the reader can see in
+ *  the file tells it that an area's glyph run has been superseded. */
+export type { TextSubstitution } from "./pdfTextSubstitution.js";
+
 export type { BoundingBox, ByteRange, SourceOrigin } from "./documentCoordinates.js";
 
 /** A leaf primitive the readers need and both applications use. It lives here

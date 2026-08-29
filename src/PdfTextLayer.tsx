@@ -3,6 +3,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 import { attachWebkitMarginSelection } from "./pdfWebkitSelection.js";
+import { substitutePageText, type TextSubstitution } from "./pdfTextSubstitution.js";
 
 // pdf.js' viewer-components build (`web/pdf_viewer.mjs`) reads the core library
 // off `globalThis.pdfjsLib` at module-evaluation time. We must publish it there
@@ -23,6 +24,9 @@ interface Props {
   pageNumber: number;
   /** CSS pixels per PDF unit, i.e. renderedWidth / unscaledPageWidth. */
   scale: number;
+  /** This page's areas whose text the host's reading owns. Must be
+   *  referentially stable per page: it re-renders the layer. */
+  substitutions?: readonly TextSubstitution[];
 }
 
 /**
@@ -35,7 +39,7 @@ interface Props {
  * selection listener spans every mounted page, virtualized ones included) and
  * is maintained upstream. The canvas beside it is drawn by `PdfPageCanvas`.
  */
-export default function PdfTextLayer({ pdf, pageNumber, scale }: Props) {
+export default function PdfTextLayer({ pdf, pageNumber, scale, substitutions }: Props) {
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -65,6 +69,15 @@ export default function PdfTextLayer({ pdf, pageNumber, scale }: Props) {
           builder.cancel();
           return;
         }
+        // Before the layer is in the document: substitution is arithmetic on
+        // the inline styles pdf.js just wrote, so it needs no layout, and
+        // doing it here means no frame ever shows the glyph runs the reading
+        // dropped. The page's own units are the viewport at scale 1, which is
+        // the space `bbox` is expressed in.
+        if (substitutions?.length) {
+          const { width, height } = page.getViewport({ scale: 1 });
+          substitutePageText(builder.div, substitutions, width, height);
+        }
         wrapper.append(builder.div);
         detachWebkitFix = attachWebkitMarginSelection(builder.div);
       })
@@ -78,7 +91,7 @@ export default function PdfTextLayer({ pdf, pageNumber, scale }: Props) {
       builder?.cancel();
       builder?.div.remove();
     };
-  }, [pdf, pageNumber, scale]);
+  }, [pdf, pageNumber, scale, substitutions]);
 
   return <div ref={wrapperRef} className="absolute inset-0" />;
 }

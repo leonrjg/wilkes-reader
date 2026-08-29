@@ -127,8 +127,11 @@ vi.mock("./pdfDocumentCache", () => ({
 
 // Mock the text-selection overlay; it loads pdf.js' viewer-components bundle,
 // which is out of scope for these PdfViewer rendering/navigation unit tests.
+// Its props are recorded: what each page's layer is told to substitute is this
+// component's decision, and the layer itself is where that is carried out.
+const { mockTextLayer } = vi.hoisted(() => ({ mockTextLayer: vi.fn((_props: any) => null) }));
 vi.mock("./PdfTextLayer", () => ({
-  default: () => null,
+  default: (props: any) => mockTextLayer(props),
 }));
 
 // Mock the link-annotation overlay; it calls pdf.js page APIs absent from the
@@ -290,6 +293,32 @@ describe("PdfViewer", () => {
     
     expect(screen.getByText("100%")).toBeInTheDocument();
     expect(screen.getByText("1/10")).toBeInTheDocument();
+  });
+
+  it("hands each page only the substitutions that belong to it", async () => {
+    const onPage2 = { page: 2, bbox: { x: 1, y: 2, width: 3, height: 4 }, text: "x^2" };
+    render(
+      <PdfViewer
+        {...defaultProps}
+        textSubstitutions={[
+          { page: 1, bbox: { x: 0, y: 0, width: 1, height: 1 }, text: "\\alpha" },
+          onPage2,
+        ]}
+      />,
+      { host: defaultHost },
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    const substitutionsFor = (page: number) =>
+      mockTextLayer.mock.calls.map(([props]) => props).find((props) => props.pageNumber === page)
+        ?.substitutions;
+    expect(substitutionsFor(2)).toEqual([onPage2]);
+    // A page with none is told nothing rather than an empty list it would have
+    // to re-render for.
+    expect(substitutionsFor(3)).toBeUndefined();
   });
 
   it("changes zoom in 10 percent steps", async () => {
