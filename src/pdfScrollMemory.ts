@@ -8,13 +8,22 @@
  *
  *  This module owns storage only; capturing/restoring the geometry is the
  *  reader's responsibility (it alone knows the DOM layout). */
-/** The vertical anchor of the viewport, independent of zoom/width. */
+/** Where the viewport sits, expressed independently of zoom/width. This is the
+ *  reader's *primary* record of its own position: the container's scrollTop and
+ *  scrollLeft are derived from it whenever the layout reflows, never the other
+ *  way round. Pixel offsets cannot survive a reflow -- the browser keeps them
+ *  numerically constant while the content they index into changes size, and
+ *  clamps them irreversibly when it shrinks. */
 export interface PdfScrollAnchor {
   /** 1-based page at the top of the viewport. */
   page: number;
   /** Fraction (0..1) of that page's height scrolled past its top. Stored as a
    *  ratio rather than pixels so it survives the reader's zoom/width changes. */
   offsetRatio: number;
+  /** Fraction (0..1) of the content width under the viewport's horizontal
+   *  centre. The horizontal counterpart of `offsetRatio`, and the reason a
+   *  zoomed-in page keeps looking at the same column when the pane resizes. */
+  horizontalRatio: number;
 }
 
 export interface PdfScrollPosition extends PdfScrollAnchor {

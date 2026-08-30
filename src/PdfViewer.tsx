@@ -30,7 +30,6 @@ import {
   readPdfScrollPosition,
   savePdfScrollPosition,
   type PdfScrollAnchor,
-  type PdfScrollPosition,
 } from "./pdfScrollMemory.js";
 import {
   pdfDocumentKey,
@@ -195,10 +194,14 @@ function mergeRectsByLine(rects: BoundingBox[]): BoundingBox[] {
   return lines;
 }
 
-/** Capture the reader's current position as a page + intra-page ratio, reading
- *  live DOM geometry. Returns null when nothing is measurable yet (no rendered
- *  page spans the viewport top), so callers never persist a garbage position. */
-function captureScrollPosition(container: HTMLDivElement): PdfScrollAnchor | null {
+/** Capture the reader's current position as a page + intra-page ratio + the
+ *  horizontal focal point, reading live DOM geometry. Returns null when nothing
+ *  is measurable yet (no rendered page spans the viewport top), so callers never
+ *  persist a garbage position. */
+function captureScrollPosition(
+  container: HTMLDivElement,
+  contentWidth: number,
+): PdfScrollAnchor | null {
   const viewportTop = container.getBoundingClientRect().top;
   const pageElements = container.querySelectorAll<HTMLElement>("[data-page-number]");
   for (const pageElement of pageElements) {
@@ -206,7 +209,15 @@ function captureScrollPosition(container: HTMLDivElement): PdfScrollAnchor | nul
     if (rect.height > 0 && rect.top <= viewportTop && rect.bottom > viewportTop) {
       const page = Number(pageElement.dataset.pageNumber);
       if (!page) return null;
-      return { page, offsetRatio: (viewportTop - rect.top) / rect.height };
+      return {
+        page,
+        offsetRatio: (viewportTop - rect.top) / rect.height,
+        // The content width is the component's own layout decision, not
+        // something to read back off the DOM: `scrollWidth` includes the
+        // container's padding, which would bias the ratio by a few pixels on
+        // every capture and drift the focal point across repeated reflows.
+        horizontalRatio: (container.scrollLeft + container.clientWidth / 2) / contentWidth,
+      };
     }
   }
   return null;
@@ -299,6 +310,11 @@ export default function PdfViewer({
     return byPage;
   }, [textSubstitutions]);
   const [containerWidth, setContainerWidth] = useState(600);
+  // The same width, readable from the ResizeObserver callback. The observer has
+  // to know whether the width it was handed is genuinely new *before* deciding
+  // to capture an anchor, and it cannot see the state variable its own previous
+  // call set.
+  const containerWidthRef = useRef(600);
   const [currentPage, setCurrentPage] = useState(page);
   const prevNavigationTargetRef = useRef<{ page: number; bbox: BoundingBox | null } | null>(null);
   // The page this viewer actually lands on for the initial open (props.page, or
@@ -343,15 +359,29 @@ export default function PdfViewer({
   // horizontal scroll position is a fraction *of*. Reading the page's width
   // for this would drift the zoom recentre by the gutter.
   const contentWidth = renderedWidth + gutterWidth;
+  // The committed content width, readable from callbacks that fire between
+  // renders (the ResizeObserver, the async auto-zoom measurement). Mirrored in a
+  // layout effect rather than closed over, so `markReflowAnchor` keeps a stable
+  // identity -- it is a dependency of the auto-zoom effect, which must not be
+  // torn down and restarted every time the pane changes width mid-measurement.
+  const contentWidthRef = useRef(contentWidth);
   const { pageMetrics, hasPageMetrics } = usePdfPageMetrics(pdf, documentKey);
   const outline = usePdfOutline(pdf);
 
-  // Preserve the horizontal focal point across a zoom change. Without this the
-  // scroll container keeps scrollLeft = 0, so a zoomed-in page stays pinned to
-  // the left edge and its centre drifts off-screen to the right. We capture the
-  // point under the viewport's horizontal centre as a fraction of the current
-  // content width, then re-apply it once the page has grown to its new width.
-  const pendingZoomAnchorRef = useRef<number | null>(null);
+  // Where the reader is, as a page + two ratios rather than as pixels. This is
+  // the position of record: `scrollTop`/`scrollLeft` are recomputed from it
+  // after every reflow. Written by genuine user scrolling (see
+  // `rememberScrollPosition`) and by a deliberate landing (`restoreScrollPosition`),
+  // and deliberately *not* written by the restores those reflows perform -- so a
+  // pane opening and closing again re-derives the same two offsets from the same
+  // untouched anchor instead of accumulating drift.
+  const anchorRef = useRef<PdfScrollAnchor | null>(null);
+  // Set immediately before a state change that will re-lay out the pages (a zoom
+  // step, a resized pane), and consumed by the reflow effect below. It marks a
+  // width change as "preserve the reader's place across this", distinguishing it
+  // from the one at mount, where there is no place to preserve yet and the
+  // remembered-position restore has not run.
+  const reanchorAfterReflowRef = useRef(false);
 
   // URL of the document we have already auto-zoomed, so the measurement runs
   // exactly once per document (and never fights a subsequent manual zoom). A
@@ -361,33 +391,41 @@ export default function PdfViewer({
     readPdfScrollPosition(documentKey)?.zoom !== undefined ? documentKey : null,
   );
 
-  const setZoomKeepingHorizontalCenter = useCallback(
-    (nextZoom: (zoom: number) => number) => {
-      setZoom((zoom) => {
-        const next = nextZoom(zoom);
-        // No-op at the min/max limits: leave no pending anchor, otherwise it
-        // would be applied later on an unrelated resize.
-        if (next === zoom) return zoom;
-        const container = containerRef.current;
-        if (container && contentWidth > 0) {
-          const centerX = container.scrollLeft + container.clientWidth / 2;
-          pendingZoomAnchorRef.current = centerX / contentWidth;
-        }
-        return next;
-      });
-    },
-    [contentWidth],
-  );
-
   useLayoutEffect(() => {
-    const relativeCenter = pendingZoomAnchorRef.current;
-    const container = containerRef.current;
-    if (relativeCenter === null || !container) return;
-    pendingZoomAnchorRef.current = null;
-    // Synchronous: renderedWidth (and the page div's width) already updated in
-    // this commit, so scrollWidth is grown before paint — no left-edge flash.
-    container.scrollLeft = relativeCenter * contentWidth - container.clientWidth / 2;
+    contentWidthRef.current = contentWidth;
   }, [contentWidth]);
+
+  // Arm the reflow effect: the caller is about to change something that resizes
+  // the pages, and the reader should come out of it looking at the same place.
+  //
+  // The anchor is only read from the DOM when we do not have one yet -- before
+  // the first scroll of a freshly opened document. Afterwards the stored anchor
+  // is strictly better than a fresh capture, because by the time a resize is
+  // observable the browser has *already* re-laid-out the container and clamped
+  // `scrollTop` to the new maximum. Reading the DOM at that point would capture
+  // the clamped position and bake the loss in; the stored anchor predates it.
+  const markReflowAnchor = useCallback(() => {
+    reanchorAfterReflowRef.current = true;
+    if (anchorRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
+    anchorRef.current = captureScrollPosition(container, contentWidthRef.current);
+  }, []);
+
+  const setZoomKeepingPlace = useCallback(
+    (nextZoom: (zoom: number) => number) => {
+      const next = nextZoom(zoom);
+      // No-op at the min/max limits: do not arm the reflow effect, otherwise it
+      // would fire on the next unrelated width change.
+      if (next === zoom) return;
+      // Read the anchor before the state change, not inside the updater: React
+      // may invoke an updater more than once, and capturing geometry is not
+      // something to do from a place that is allowed to run twice.
+      markReflowAnchor();
+      setZoom(next);
+    },
+    [zoom, markReflowAnchor],
+  );
 
   // Auto-zoom a freshly opened document so its body text renders at a
   // comfortable on-screen size. We sample a few pages, take the
@@ -444,16 +482,18 @@ export default function PdfViewer({
       // untouched rather than nudging it and flickering the page.
       if (rawZoom < AUTO_ZOOM_MIN_INCREASE) return;
       const autoZoom = Math.min(AUTO_ZOOM_MAX, rawZoom);
-      // Reuse the recentre mechanism so the enlarged page opens horizontally
-      // centred (equal margins trimmed) instead of pinned to the left edge.
-      pendingZoomAnchorRef.current = 0.5;
+      // The same anchoring every other reflow uses, so the enlarged page opens
+      // horizontally centred (equal margins trimmed) instead of pinned to the
+      // left edge. At fit-to-width the captured focal point *is* the middle of
+      // the page, so no special "centre it" case is needed.
+      markReflowAnchor();
       setZoom(autoZoom);
     })().catch((e) => console.error("PDF auto-zoom measurement failed:", e));
 
     return () => {
       cancelled = true;
     };
-  }, [autoZoomTargetPx, pdf, documentKey]);
+  }, [autoZoomTargetPx, pdf, documentKey, markReflowAnchor]);
 
   const getVirtualPageSize = useCallback(
     (index: number) => {
@@ -510,13 +550,28 @@ export default function PdfViewer({
   // also absorbs any residual from scrollToIndex's estimate-based alignment,
   // replacing the old relative `+=` nudge that landed on an uncertain base.
   const restoreScrollPosition = useCallback(
-    (pos: PdfScrollPosition) => {
+    (pos: PdfScrollAnchor) => {
       const pageIndex = Math.min(Math.max(pos.page - 1, 0), pageMetrics.length - 1);
       isRestoringRef.current = true;
       if (restoreSettleTimerRef.current) clearTimeout(restoreSettleTimerRef.current);
+      // This is now the reader's place, so it is what any later reflow restores.
+      // Recording it here (rather than letting the resulting scroll events do it)
+      // is what makes repeated reflows idempotent: they all re-derive from this
+      // one anchor instead of from each other's rounded-off results.
+      anchorRef.current = pos;
 
       virtualizer.scrollToIndex(pageIndex, { align: "start" });
       setCurrentPage(pageIndex + 1);
+
+      const container = containerRef.current;
+      if (container) {
+        // Horizontal lands synchronously. When this restore follows a reflow, the
+        // page div's width was set in the same commit, so the scrollable extent
+        // has already grown and the browser will not clamp us to a stale maximum
+        // -- and nothing is painted at the left edge first.
+        container.scrollLeft =
+          pos.horizontalRatio * contentWidth - container.clientWidth / 2;
+      }
 
       requestAnimationFrame(() => {
         const container = containerRef.current;
@@ -539,8 +594,25 @@ export default function PdfViewer({
         }, 250);
       });
     },
-    [virtualizer, pageMetrics],
+    [virtualizer, pageMetrics, contentWidth],
   );
+
+  // Re-derive both scroll offsets from the anchor after the pages have been
+  // re-laid-out at a new width. This is the whole of the fix for "open a pane,
+  // close it again, and the document has moved": a pixel offset means a
+  // different place at every width, and the browser clamps it -- destructively --
+  // whenever the content it indexes into gets shorter or narrower. The anchor
+  // does not change, so the offsets computed from it come back.
+  //
+  // Declared after the `virtualizer.measure()` effect above so the reset lands
+  // first: `scrollToIndex` positions by the virtualizer's estimates, and those
+  // are the stale ones until measure() has run.
+  useLayoutEffect(() => {
+    if (!reanchorAfterReflowRef.current) return;
+    reanchorAfterReflowRef.current = false;
+    const anchor = anchorRef.current;
+    if (anchor) restoreScrollPosition(anchor);
+  }, [contentWidth, restoreScrollPosition]);
 
   // Follow an in-document GoTo link (table-of-contents entry, cross-reference):
   // resolve its destination to a page and scroll there, nudging to the exact
@@ -709,16 +781,25 @@ export default function PdfViewer({
     // restore had landed, reflowing the document and shifting the restored
     // position off by a constant amount.
     const initialWidth = el.clientWidth;
-    if (initialWidth > 0) setContainerWidth(initialWidth);
+    if (initialWidth > 0) {
+      containerWidthRef.current = initialWidth;
+      setContainerWidth(initialWidth);
+    }
     const ro = new ResizeObserver((entries) => {
       const w = entries[0].contentRect.width;
-      if (w > 0) {
-        setContainerWidth(w);
-      }
+      // Same width as we already hold: the observer's initial callback, or a
+      // resize on the other axis. Arming the reflow effect for it would restore
+      // the anchor over a scroll the user made since, for no reflow at all.
+      if (w <= 0 || w === containerWidthRef.current) return;
+      // Before the state change, so the effect that runs once the pages have been
+      // re-laid-out knows to put the reader back where they were.
+      markReflowAnchor();
+      containerWidthRef.current = w;
+      setContainerWidth(w);
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [markReflowAnchor]);
 
   // Clear PreviewPane's "loading document" overlay exactly once, when the page
   // we actually landed on has painted.
@@ -792,9 +873,14 @@ export default function PdfViewer({
     if (isRestoringRef.current) return;
     const container = containerRef.current;
     if (!container) return;
-    const pos = captureScrollPosition(container);
-    if (pos) savePdfScrollPosition(documentKey, { ...pos, zoom });
-  }, [documentKey, zoom]);
+    const pos = captureScrollPosition(container, contentWidth);
+    if (!pos) return;
+    // The anchor of record, and the session memory, are the same measurement:
+    // one is where a reflow puts the reader back, the other is where reopening
+    // the document does.
+    anchorRef.current = pos;
+    savePdfScrollPosition(documentKey, { ...pos, zoom });
+  }, [documentKey, zoom, contentWidth]);
 
   useEffect(
     () => () => {
@@ -871,7 +957,7 @@ export default function PdfViewer({
       getDocument: () => pdf ?? null,
       getZoom: () => zoom,
       setZoom: (next) =>
-        setZoomKeepingHorizontalCenter(() =>
+        setZoomKeepingPlace(() =>
           Math.min(PDF_MAX_ZOOM, Math.max(PDF_MIN_ZOOM, +next.toFixed(2))),
         ),
       openFind: (query) => {
@@ -890,7 +976,7 @@ export default function PdfViewer({
       numPages,
       pdf,
       zoom,
-      setZoomKeepingHorizontalCenter,
+      setZoomKeepingPlace,
       find,
     ],
   );
@@ -933,8 +1019,8 @@ export default function PdfViewer({
           {numPages && <span className="text-[var(--text-dim)]">|</span>}
           <ZoomControls
             zoom={zoom}
-            onZoomIn={() => setZoomKeepingHorizontalCenter((z) => Math.min(PDF_MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)))}
-            onZoomOut={() => setZoomKeepingHorizontalCenter((z) => Math.max(PDF_MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)))}
+            onZoomIn={() => setZoomKeepingPlace((z) => Math.min(PDF_MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)))}
+            onZoomOut={() => setZoomKeepingPlace((z) => Math.max(PDF_MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)))}
           />
         </div>
       </div>

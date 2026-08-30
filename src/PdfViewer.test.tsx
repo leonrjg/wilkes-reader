@@ -179,15 +179,29 @@ vi.mock("./usePdfPageMetrics", async () => {
   };
 });
 
-// Non-firing ResizeObserver: leaves `containerWidth` at its 600px placeholder
-// (pageScale = 1, which the overlay-position assertions rely on). Auto-zoom does
-// not depend on the observed width — it measures against a fixed reference — so
-// nothing here needs to report a size.
+// ResizeObserver that never fires on its own: `containerWidth` stays at its
+// 600px placeholder (pageScale = 1, which the overlay-position assertions rely
+// on). Auto-zoom does not depend on the observed width — it measures against a
+// fixed reference — so nothing here needs to report a size unprompted.
+//
+// Instances are recorded so the reflow tests can play the part of the browser
+// and report a new pane width themselves.
+const resizeObserverCallbacks: ResizeObserverCallback[] = [];
 global.ResizeObserver = class {
+  constructor(callback: ResizeObserverCallback) {
+    resizeObserverCallbacks.push(callback);
+  }
   observe = vi.fn();
   unobserve = vi.fn();
   disconnect = vi.fn();
 } as unknown as typeof ResizeObserver;
+
+/** Report a new pane width to the viewer, the way the browser would once the
+ *  host has opened a side pane or the window has been resized. */
+function reportPaneWidth(width: number) {
+  const callback = resizeObserverCallbacks[resizeObserverCallbacks.length - 1];
+  callback([{ contentRect: { width } }] as unknown as ResizeObserverEntry[], null as never);
+}
 
 function domRect(top: number, left: number, width: number, height: number): DOMRect {
   return {
@@ -235,6 +249,7 @@ describe("PdfViewer", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resizeObserverCallbacks.length = 0;
     mockPdfDoc.value = {
       numPages: 10,
       getPage: async (_pageNumber: number) => ({
@@ -362,6 +377,147 @@ describe("PdfViewer", () => {
 
     expect(screen.getByText("110%")).toBeInTheDocument();
     expect(mockVirtualizer.measure).toHaveBeenCalled();
+  });
+
+  // A stand-in for the browser's layout, so a test can resize the pane (or zoom)
+  // and have the page geometry follow the way it would on screen. The container
+  // and the pages are sized separately, and in that order, because that is the
+  // order the real thing does it in: when a resize becomes observable the
+  // container is already at its new width while the pages, whose width comes
+  // from React state, are still at the old one.
+  function sizePane(container: HTMLElement, paneWidth: number) {
+    container.getBoundingClientRect = () => domRect(0, 0, paneWidth, 400);
+    Object.defineProperty(container, "clientWidth", { value: paneWidth, configurable: true });
+  }
+
+  // Lay the 600x800 stub pages out one after another at the given rendered
+  // width, with the standard 12px gap. Each page's position on screen follows
+  // from the container's scrollTop, read at call time so the geometry stays
+  // truthful as the reader scrolls.
+  function layOutPages(container: HTMLElement, renderedWidth: number) {
+    const scale = renderedWidth / 600;
+    const pageHeight = 800 * scale;
+    for (const pageElement of document.querySelectorAll<HTMLElement>("[data-page-number]")) {
+      const index = Number(pageElement.dataset.pageNumber) - 1;
+      pageElement.getBoundingClientRect = () =>
+        domRect(index * (pageHeight + 12) - container.scrollTop, 0, renderedWidth, pageHeight);
+    }
+  }
+
+  it("comes back to the same place when a pane opens and closes again", () => {
+    // The bug this pins. The reader's position used to live only in the
+    // container's scrollTop -- a pixel offset that means a different place at
+    // every page width, and that the browser clamps against the new extent,
+    // irreversibly, when the content gets shorter. Opening a pane therefore
+    // moved the document, and closing it again did not move it back.
+    //
+    // The anchor is a page plus a fraction of that page, so both offsets are
+    // re-derived from it after every reflow and the clamp has nothing to eat.
+    const frames = deferAnimationFrames();
+    render(
+      <PdfViewer source="reflow.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />,
+      { host: defaultHost },
+    );
+
+    const container = document.querySelector<HTMLElement>(".overflow-auto")!;
+    // Reading page 2, 36% of the way down it: page 2 starts at 812 in content
+    // coordinates (one 800px page plus the 12px gap), and 812 + 0.36 * 800 = 1100.
+    container.scrollTop = 1100;
+    sizePane(container, 600);
+    layOutPages(container, 600);
+    fireEvent.scroll(container);
+    act(() => frames.flush());
+
+    // A pane opens, halving the reader's width. Every page is shorter, so the
+    // document is shorter, and the browser has already clamped scrollTop against
+    // the new extent by the time the resize is observable.
+    act(() => {
+      container.scrollTop = 500;
+      sizePane(container, 300);
+      reportPaneWidth(300);
+    });
+    layOutPages(container, 300);
+    act(() => frames.flush());
+
+    // Same page, same fraction of it: page 2 now starts at 412 and is 400 tall.
+    expect(container.scrollTop).toBeCloseTo(412 + 0.36 * 400);
+
+    // The pane closes again. This is the assertion that matters: the reader is
+    // back exactly where it started, not merely close to it.
+    act(() => {
+      sizePane(container, 600);
+      reportPaneWidth(600);
+    });
+    layOutPages(container, 600);
+    act(() => frames.flush());
+
+    expect(container.scrollTop).toBeCloseTo(1100);
+  });
+
+  it("keeps the column it is looking at when a zoomed-in pane resizes", () => {
+    // The horizontal focal point used to be preserved across a zoom step and
+    // nothing else, so a resize left scrollLeft at an absolute value indexing
+    // into content of a different width -- sliding the page sideways.
+    const frames = deferAnimationFrames();
+    const handle = createRef<PdfReaderHandle>();
+    render(
+      <PdfViewer
+        ref={handle}
+        source="reflow-columns.pdf"
+        page={1}
+        highlight_bbox={null}
+        onRenderSuccess={vi.fn()}
+      />,
+      { host: defaultHost },
+    );
+
+    // Zoom before any geometry exists, so this step captures no anchor and the
+    // test is about the resize alone.
+    act(() => handle.current!.setZoom(2));
+
+    const container = document.querySelector<HTMLElement>(".overflow-auto")!;
+    container.scrollTop = 100;
+    container.scrollLeft = 500;
+    sizePane(container, 600);
+    // At 200%, the 600-unit page is 1200px wide -- twice the 600px pane.
+    layOutPages(container, 1200);
+    fireEvent.scroll(container);
+    act(() => frames.flush());
+
+    // Looking at x = 500 + 600/2 = 800 of 1200: two thirds across the page.
+    act(() => {
+      sizePane(container, 300);
+      reportPaneWidth(300);
+    });
+
+    // The pane is now 300 wide and the page 600, so two thirds across is x=400,
+    // which sits at the viewport centre when scrollLeft is 400 - 150.
+    expect(container.scrollLeft).toBeCloseTo(250);
+  });
+
+  it("stays on the same line of the page across a zoom step", () => {
+    // Zooming used to recentre horizontally and leave scrollTop alone, so the
+    // taller pages slid the reader down the document -- by nothing at the top
+    // and by more the further in you were.
+    const frames = deferAnimationFrames();
+    render(
+      <PdfViewer source="reflow-zoom.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />,
+      { host: defaultHost },
+    );
+
+    const container = document.querySelector<HTMLElement>(".overflow-auto")!;
+    container.scrollTop = 1100;
+    sizePane(container, 600);
+    layOutPages(container, 600);
+    fireEvent.scroll(container);
+    act(() => frames.flush());
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    // At 110% the pages are 660x880, so page 2 starts at 892.
+    layOutPages(container, 660);
+    act(() => frames.flush());
+
+    expect(container.scrollTop).toBeCloseTo(892 + 0.36 * 880);
   });
 
   // Build a document proxy whose sampled pages report a uniform body-font size
@@ -1160,7 +1316,7 @@ describe("PdfViewer", () => {
   it("restores the remembered position when a document is reopened plainly", async () => {
     // A prior session left this document at page 3. Reopening it as a plain open
     // (page 1, no highlight target) must land back on page 3, not page 1.
-    savePdfScrollPosition("remembered.pdf", { page: 3, offsetRatio: 0, zoom: 1 });
+    savePdfScrollPosition("remembered.pdf", { page: 3, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1 });
 
     render(<PdfViewer source="remembered.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host: defaultHost });
 
@@ -1178,7 +1334,7 @@ describe("PdfViewer", () => {
     // upward. A remembered zoom is now restored synchronously and auto-zoom is
     // skipped, so the view opens exactly where (and how zoomed) it was left --
     // here 150%, not the ~125% the body-text measurement would compute.
-    savePdfScrollPosition("zoomed.pdf", { page: 3, offsetRatio: 0, zoom: 1.5 });
+    savePdfScrollPosition("zoomed.pdf", { page: 3, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1.5 });
     mockPdfDoc.value = sizedDoc(9, 612);
 
     render(<PdfViewer source="zoomed.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host: defaultHost });
@@ -1196,7 +1352,7 @@ describe("PdfViewer", () => {
     // open). When a remembered position lands the viewer deep in the document,
     // page 1 never enters the render window, so the callback never fired and the
     // spinner hung until app restart. It must now fire for the page we land on.
-    savePdfScrollPosition("deep.pdf", { page: 5, offsetRatio: 0, zoom: 1 });
+    savePdfScrollPosition("deep.pdf", { page: 5, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1 });
     mockUsePdfPageMetrics.value = {
       pageMetrics: Array.from({ length: 10 }, () => ({ width: 600, height: 800 })),
       isLoadingPageMetrics: false,
@@ -1224,7 +1380,7 @@ describe("PdfViewer", () => {
   it("lets an explicit navigation target win over the remembered position", async () => {
     // Same remembered page 5, but this open carries an explicit highlight target
     // (a search hit / bookmark). The explicit destination must win.
-    savePdfScrollPosition("explicit.pdf", { page: 3, offsetRatio: 0, zoom: 1 });
+    savePdfScrollPosition("explicit.pdf", { page: 3, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1 });
 
     render(
       <PdfViewer
