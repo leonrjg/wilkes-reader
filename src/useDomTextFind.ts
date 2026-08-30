@@ -102,15 +102,16 @@ interface Options {
 }
 
 /**
- * In-document find for the rendered Markdown viewer. Matches are painted with
- * the CSS Custom Highlight API rather than by wrapping DOM nodes, so React keeps
- * sole ownership of the tree and the source-map spans are left untouched.
+ * In-document find for a reader that renders its document into the DOM --
+ * Markdown or HTML. Matches are painted with the CSS Custom Highlight API rather
+ * than by wrapping DOM nodes, so React keeps sole ownership of the tree and the
+ * source-run spans are left untouched.
  */
-export function useMarkdownFind({ rootRef, content, query, isOpen, currentIdx, onMatchCount }: Options) {
+export function useDomTextFind({ rootRef, content, query, isOpen, currentIdx, onMatchCount }: Options) {
   useEffect(() => {
     if (!ensureHighlights()) {
       if (isOpen && query.trim()) {
-        console.warn("CSS Custom Highlight API unavailable; Markdown find is disabled.");
+        console.warn("CSS Custom Highlight API unavailable; in-document find is disabled.");
       }
       onMatchCount(0);
       return;

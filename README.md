@@ -1,6 +1,7 @@
 ## wilkes-reader (lib)
 
-Document readers — PDF, Markdown and source - used by [Wilkes](https://github.com/leonrjg/Wilkes).
+Document readers — PDF, Markdown, HTML and source - used by
+[Wilkes](https://github.com/leonrjg/Wilkes).
 
 ### What a host provides, and what it gets
 
@@ -13,7 +14,7 @@ needs, and nothing app-specific crosses back:
 | `decorations` | host → reader | Marks on the document, anchored by page rects or a text range |
 | `slots` | host → reader | Host chrome rendered inside the reader (selection actions, page gutter) |
 | `ref` | host → reader | Navigation, zoom and find as imperative commands |
-| `ReaderHostProvider` | host → reader | Capabilities the readers need: opening a URL, the colour scheme |
+| `ReaderHostProvider` | host → reader | Capabilities the readers need: opening a URL, the colour scheme, a URL for a local file |
 
 A `pageGutter` slot declares its own width, and the reader **reserves** it:
 the page is drawn into what is left of the canvas, so host chrome beside a page
@@ -28,6 +29,43 @@ slots={{ pageGutter: { width: 280, render: (page, { scale }) => <Notes … /> } 
 that contract, and the headless hooks for a host whose reading surface is not a
 reader — an annotated single-page stage, a thumbnail strip — which would
 otherwise reimplement document loading and text location badly.
+
+### An HTML file is read, not browsed
+
+`HtmlViewer` renders an HTML file the way the other readers render their
+documents: the file supplies structure and text, and the reader supplies the
+typography. What it deliberately does not supply is a browser. A file on disk
+arrives with no origin, no CSP and no user behind it, so what it may do is a
+closed list: scripts, author stylesheets, frames, forms and plugins do not
+survive parsing, and **nothing in a document can cause a request to leave the
+machine** — opening a file must not tell anyone that it was opened.
+
+Every text run is mapped back to the bytes it came from, so a bookmark, a search
+hit and a selection are in the file's own coordinates, exactly as they are in
+Markdown. This is why the rendering is faithful rather than clever: an
+extractor that decided which parts of the page were "the article" (Readability
+and its kin) would rewrite the tree those coordinates are measured in, and
+would drop, as boilerplate, content a corpus was indexed on.
+
+The one thing a file brings that a string of Markdown cannot is other files
+beside it. A relative `src` is resolved against the document and offered to the
+host:
+
+```ts
+<ReaderHostProvider value={{ …, resolveLocalAsset: (path) => api.resolveAssetUrl(path) }}>
+```
+
+Without that capability a document renders without its local pictures, showing
+their alt text; the readers will not invent a way to fetch a file the
+application has not offered them. It is also the only place a document's reach
+into the filesystem can be judged — the reference has already been resolved
+against the document, and a host that wants it fenced to a corpus fences it
+there. Remote and inline addresses never reach it: `data:` is part of the file
+and is kept, and everything else is refused.
+
+Links are destinations, never navigations. `#fragment` scrolls within the
+document, a relative link is handed to the host as a path, and anything else
+goes to `openExternal`.
 
 ### Installing
 
@@ -49,6 +87,16 @@ cd ../Wilkes/ui && npm link @leonrjg/wilkes-reader
 `npm ci` restores the tagged version. A linked package resolves to its real
 path, outside the application's root, so the application's dev server needs
 that path in `server.fs.allow` or it will refuse to serve pdf.js' worker.
+
+Any `npm install` or `npm ci` in the application replaces the link with the
+tagged package again — that is what the link is, a directory npm owns — so
+after one, re-run `npm link @leonrjg/wilkes-reader`. Until the tag the
+application asks for exists, npm resolves the previous one from the lockfile
+and the application boots to a blank window with `does not provide an export
+named …` in its console: the code was written against the working copy and the
+manifest was answered from the last release. Vite also pre-bundles the package
+into `node_modules/.vite`, so restart its dev server after re-linking or
+rebuilding the package.
 
 ### Wiring it into a Vite application
 

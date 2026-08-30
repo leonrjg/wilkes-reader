@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderedBoundaries, sourceBoundaryForDomPoint, sourceMappedMarkdown } from "./markdownSourceMap.js";
+import { sourceMappedMarkdown } from "./markdownSourceMap.js";
+import { renderedBoundaries, sourceBoundaryForDomPoint } from "./sourceRuns.js";
 
 interface TreeNode {
   type: string;
@@ -45,7 +46,7 @@ describe("rendered Markdown source mapping", () => {
 
   it("maps element endpoints to the start or end of their source run", () => {
     const span = document.createElement("span");
-    span.className = "markdown-source-run";
+    span.className = "reader-source-run";
     span.dataset.sourceBoundaries = "4,5,6,7";
     span.textContent = "abc";
 

@@ -68,13 +68,13 @@ describe("MarkdownViewer", () => {
           {
             id: "pdf-anchored",
             anchor: { kind: "rects", page: 1, rects: [{ x: 1, y: 2, width: 3, height: 4 }] },
-            className: "markdown-bookmark-highlight",
+            className: "rendered-bookmark-highlight",
           },
         ]}
       />,
     );
 
-    expect(document.querySelector(".markdown-bookmark-highlight")).toBeNull();
+    expect(document.querySelector(".rendered-bookmark-highlight")).toBeNull();
   });
 
   it("segments overlapping search and bookmark annotations from source byte ranges", () => {
@@ -93,16 +93,16 @@ describe("MarkdownViewer", () => {
           {
             id: "cafe",
             anchor: { kind: "range", range: { start, end: cafeEnd } },
-            className: "markdown-bookmark-highlight",
+            className: "rendered-bookmark-highlight",
           },
         ]}
       />,
     );
 
-    const overlap = document.querySelector<HTMLElement>(".markdown-search-highlight.markdown-bookmark-highlight");
+    const overlap = document.querySelector<HTMLElement>(".rendered-search-highlight.rendered-bookmark-highlight");
     expect(overlap).toHaveTextContent("café");
     expect(overlap).toHaveAttribute("data-decoration-ids", "reader:search,cafe");
-    expect(document.querySelector<HTMLElement>(".markdown-search-highlight:not(.markdown-bookmark-highlight)"))
+    expect(document.querySelector<HTMLElement>(".rendered-search-highlight:not(.rendered-bookmark-highlight)"))
       .toHaveTextContent("🙂");
   });
 
@@ -117,14 +117,14 @@ describe("MarkdownViewer", () => {
           {
             id: "note-1",
             anchor: { kind: "range", range: { start: 5, end: 9 } },
-            className: "markdown-bookmark-highlight",
+            className: "rendered-bookmark-highlight",
             onActivate,
           },
         ]}
       />,
     );
 
-    fireEvent.click(document.querySelector(".markdown-bookmark-highlight")!);
+    fireEvent.click(document.querySelector(".rendered-bookmark-highlight")!);
     expect(onActivate).toHaveBeenCalledWith("note-1", {
       left: 0,
       top: 0,
@@ -173,7 +173,7 @@ describe("MarkdownViewer", () => {
         slots={{ selectionActions: stubSelectionSlot({ onAction: onSelected }) }}
       />,
     );
-    const run = Array.from(document.querySelectorAll<HTMLElement>(".markdown-source-run"))
+    const run = Array.from(document.querySelectorAll<HTMLElement>(".reader-source-run"))
       .find((element) => element.textContent === "this")!;
     const text = run.firstChild!;
     const rect = { top: 10, left: 10, right: 50, bottom: 30, width: 40, height: 20, x: 10, y: 10, toJSON: () => ({}) } as DOMRect;

@@ -29,6 +29,9 @@ export type { PdfViewerProps, PdfReaderHandle, PdfSelection } from "./PdfViewer.
 export { default as MarkdownViewer } from "./MarkdownViewer.js";
 export type { MarkdownViewerProps, MarkdownReaderHandle } from "./MarkdownViewer.js";
 
+export { default as HtmlViewer } from "./HtmlViewer.js";
+export type { HtmlViewerProps, HtmlReaderHandle } from "./HtmlViewer.js";
+
 export { default as CodeViewer, getLanguageExtension } from "./CodeViewer.js";
 export type { CodeViewerProps, CodeReaderHandle } from "./CodeViewer.js";
 

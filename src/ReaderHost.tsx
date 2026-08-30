@@ -26,6 +26,18 @@ export interface ReaderHostServices {
   /** Target CSS-pixel height for body text when a PDF is first opened.
    *  `undefined` disables auto-zoom. */
   pdfAutoZoomTargetPx?: number;
+  /** A URL the application will serve a local file at, for the subresources a
+   *  document references -- the images beside an HTML file.
+   *
+   *  Optional because it is a decision, not a detail: a host that does not
+   *  supply it gets documents rendered without their local images, and the
+   *  readers will not invent a way to fetch a file the application has not
+   *  offered them. Returning `null` refuses one path; the reader then shows the
+   *  image's alt text. This is also the only place a document's reach into the
+   *  filesystem can be judged -- the reference has already been resolved
+   *  against the document, and a host that wants it fenced to a corpus fences
+   *  it here. */
+  resolveLocalAsset?: (path: string) => string | null;
 }
 
 const ReaderHostContext = createContext<ReaderHostServices | null>(null);

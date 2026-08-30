@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { findMatchRanges } from "./useMarkdownFind.js";
+import { findMatchRanges } from "./useDomTextFind.js";
 
 function mount(html: string): HTMLElement {
   const root = document.createElement("div");

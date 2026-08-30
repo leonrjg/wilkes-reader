@@ -146,16 +146,17 @@
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.5);
 }
 
-/* Inline highlights (Markdown). Text in flow can wrap, so these carry an
-   underline where the absolutely positioned PDF boxes carry a full border;
-   the colours come from the same role tokens. */
+/* Inline highlights, for any document rendered into flowing text (Markdown,
+   HTML). Text in flow can wrap, so these carry an underline where the
+   absolutely positioned PDF boxes carry a full border; the colours come from
+   the same role tokens. */
 
-.markdown-search-highlight {
+.rendered-search-highlight {
   background-color: var(--hl-active-bg);
   border-bottom: var(--hl-underline) solid var(--hl-active-border);
 }
 
-.markdown-bookmark-highlight {
+.rendered-bookmark-highlight {
   background-color: var(--hl-bookmark-bg);
   border-bottom: var(--hl-underline) solid var(--hl-bookmark-border);
   cursor: pointer;
@@ -171,12 +172,12 @@
   cursor: pointer;
 }
 
-.markdown-search-highlight.markdown-bookmark-highlight {
+.rendered-search-highlight.rendered-bookmark-highlight {
   background: linear-gradient(var(--hl-active-bg), var(--hl-active-bg)),
     linear-gradient(var(--hl-bookmark-bg), var(--hl-bookmark-bg));
 }
 
-/* In-document find (rendered Markdown), painted via the CSS Custom Highlight
+/* In-document find in a rendered document, painted via the CSS Custom Highlight
    API, which only accepts colour properties — no border, so the passive and
    active hits are separated by alpha alone. */
 
@@ -188,7 +189,7 @@
   background-color: var(--hl-active-bg);
 }
 
-/* Rendered Markdown typography.
+/* Rendered document typography (Markdown, HTML).
  *
  * `.prose` is the whole of it; `.prose-chat` and `.prose-document` are the
  * three places the two surfaces genuinely disagree -- how wide they run, and
@@ -337,4 +338,71 @@
   text-align: center;
   vertical-align: middle;
   word-break: normal;
+}
+
+/* Rendered HTML.
+ *
+ * An HTML file arrives with its own stylesheet stripped, so what is left is the
+ * document's structure in the reader's typography -- the same face and measure
+ * every other document is read in. These rules are only for the elements
+ * Markdown never produces, plus the one thing a file on disk brings that a
+ * string of Markdown does not: pictures beside it, of any size.
+ */
+
+.prose-html img {
+  height: auto;
+  max-width: 100%;
+}
+
+/* An image the host would not serve. The document keeps its place in the
+   reading -- what the picture was is still written in its alt text -- without
+   the browser's broken-image mark, which says a load failed when nothing was
+   ever loaded. */
+
+.prose-html img[data-unresolved-src] {
+  color: var(--text-dim);
+  display: inline-block;
+  font-size: 0.9em;
+  font-style: italic;
+}
+
+.prose-html figure {
+  margin: 0.8rem 0;
+}
+
+.prose-html figcaption,
+.prose-html caption {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  margin-top: 0.3rem;
+  text-align: center;
+}
+
+.prose-html hr {
+  border: 0;
+  border-top: 1px solid var(--border-main);
+  margin: 1.1rem 0;
+}
+
+.prose-html dt {
+  font-weight: 650;
+  margin-top: 0.5rem;
+}
+
+.prose-html dd {
+  margin-left: 1.25rem;
+}
+
+.prose-html mark {
+  background: var(--hl-match-bg);
+  color: inherit;
+}
+
+.prose-html abbr[title] {
+  text-decoration: underline dotted;
+}
+
+.prose-html sub,
+.prose-html sup {
+  line-height: 0;
 }

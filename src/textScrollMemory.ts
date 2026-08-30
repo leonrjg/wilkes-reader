@@ -1,13 +1,15 @@
 /** Session-scoped reader positions for text documents. Positions are keyed by
- * document path and presentation mode so Source and Rendered Markdown views do
- * not overwrite one another. A normalized ratio survives viewport resizing. */
+ * document path and presentation mode so the source and rendered views of one
+ * document do not overwrite one another. A normalized ratio survives viewport
+ * resizing. Zoom is keyed by path alone: how large a document is read at is a
+ * property of the document, not of which surface it is being read on. */
 export type TextViewerMode = "source" | "rendered";
 
 const positions = new Map<string, number>();
-const markdownZooms = new Map<string, number>();
+const zooms = new Map<string, number>();
 
-export const MARKDOWN_MIN_ZOOM = 0.6;
-export const MARKDOWN_MAX_ZOOM = 2.5;
+export const TEXT_MIN_ZOOM = 0.6;
+export const TEXT_MAX_ZOOM = 2.5;
 
 function key(path: string, mode: TextViewerMode): string {
   return `${path}\u0000${mode}`;
@@ -21,10 +23,10 @@ export function readTextScrollPosition(path: string, mode: TextViewerMode): numb
   return positions.get(key(path, mode)) ?? null;
 }
 
-export function saveMarkdownZoom(path: string, zoom: number): void {
-  markdownZooms.set(path, Math.min(Math.max(zoom, MARKDOWN_MIN_ZOOM), MARKDOWN_MAX_ZOOM));
+export function saveTextZoom(path: string, zoom: number): void {
+  zooms.set(path, Math.min(Math.max(zoom, TEXT_MIN_ZOOM), TEXT_MAX_ZOOM));
 }
 
-export function readMarkdownZoom(path: string): number {
-  return markdownZooms.get(path) ?? 1;
+export function readTextZoom(path: string): number {
+  return zooms.get(path) ?? 1;
 }

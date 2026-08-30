@@ -1,7 +1,7 @@
 {
   "name": "@leonrjg/wilkes-reader",
-  "version": "0.5.0",
-  "description": "Document readers (PDF, Markdown, source) shared between Wilkes and Underdog.",
+  "version": "0.6.0",
+  "description": "Document readers (PDF, Markdown, HTML, source) shared between Wilkes and Underdog.",
   "license": "MIT",
   "repository": "github:leonrjg/wilkes-reader",
   "type": "module",
@@ -62,7 +62,11 @@
     "@codemirror/theme-one-dark": "^6",
     "@codemirror/view": "^6",
     "@tanstack/react-virtual": "^3",
+    "@types/hast": "^3.0.5",
     "codemirror": "^6",
+    "hast-util-from-html": "^2.0.3",
+    "hast-util-sanitize": "^5.0.2",
+    "hast-util-to-jsx-runtime": "^2.3.6",
     "react-feather": "^2.0.10",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"

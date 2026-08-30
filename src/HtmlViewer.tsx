@@ -7,15 +7,16 @@ import {
   useState,
   type Ref,
 } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { ByteRange } from "./documentCoordinates.js";
 import SelectionLayer from "./SelectionLayer.js";
 import FindBar from "./FindBar.js";
 import ZoomControls, { ZOOM_STEP } from "./ZoomControls.js";
 import { useDocumentFind } from "./useDocumentFind.js";
 import { useDomTextFind } from "./useDomTextFind.js";
-import { sourceMappedMarkdown } from "./markdownSourceMap.js";
+import { useReaderHost } from "./ReaderHost.js";
+import { LOCAL_LINK_ATTRIBUTE, markHtmlDocument, parseHtmlDocument } from "./htmlDocument.js";
 import { sourceRunSelection, type TextAnnotation } from "./sourceRuns.js";
 import {
   readTextScrollPosition,
@@ -34,9 +35,14 @@ import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.
  *  host's decorations: where a document opens is the reader's business. */
 const SEARCH_DECORATION_ID = "reader:search";
 
-export interface MarkdownReaderHandle extends FindableReaderHandle, ZoomableReaderHandle {}
+/** Sanitizing prefixes every `id` in the document, so that a document cannot
+ *  put an element where one of the application's own ids used to resolve. An
+ *  in-document link has to be resolved through the same prefix. */
+const ID_PREFIX = "user-content-";
 
-export interface MarkdownViewerProps {
+export interface HtmlReaderHandle extends FindableReaderHandle, ZoomableReaderHandle {}
+
+export interface HtmlViewerProps {
   content: string;
   documentPath: string;
   restoreScrollPosition?: boolean;
@@ -45,10 +51,20 @@ export interface MarkdownViewerProps {
    *  `rects` anchors belong to the PDF reader and are ignored. */
   decorations?: Decoration[];
   slots?: ReaderSlots;
-  ref?: Ref<MarkdownReaderHandle>;
+  ref?: Ref<HtmlReaderHandle>;
 }
 
-export default function MarkdownViewer({
+/**
+ * An HTML file, read as a document.
+ *
+ * A browser would give the file its own stylesheet, its scripts and the
+ * network; this gives it the reader's typography and nothing else, because
+ * what is being opened is a file from a corpus rather than a page from a site.
+ * What it does give it is everything the other readers give a document:
+ * selections and bookmarks in the file's own bytes, the same find bar, the same
+ * zoom, and the host's chrome in the same slots.
+ */
+export default function HtmlViewer({
   content,
   documentPath,
   restoreScrollPosition = true,
@@ -56,7 +72,8 @@ export default function MarkdownViewer({
   decorations = [],
   slots,
   ref,
-}: MarkdownViewerProps) {
+}: HtmlViewerProps) {
+  const { openExternal, resolveLocalAsset } = useReaderHost();
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const annotations = useMemo<TextAnnotation[]>(() => [
@@ -65,7 +82,18 @@ export default function MarkdownViewer({
       : []),
     ...rangeDecorations(decorations),
   ], [decorations, highlightRange]);
-  const rehypePlugins = useMemo(() => [sourceMappedMarkdown(content, annotations)], [content, annotations]);
+
+  // Parsing and marking are separate memos because they change on different
+  // things: the file is parsed when the file changes, and marked again whenever
+  // the host moves a bookmark or the search target, which is far more often.
+  const parsed = useMemo(
+    () => parseHtmlDocument(content, { documentPath, resolveLocalAsset }),
+    [content, documentPath, resolveLocalAsset],
+  );
+  const rendered = useMemo(
+    () => toJsxRuntime(markHtmlDocument(parsed, content, annotations), { Fragment, jsx, jsxs }),
+    [parsed, content, annotations],
+  );
 
   const mapSelection = useCallback(
     (range: Range, selection: Selection) => sourceRunSelection(content, range, selection),
@@ -149,7 +177,7 @@ export default function MarkdownViewer({
 
   useImperativeHandle(
     ref,
-    (): MarkdownReaderHandle => ({
+    (): HtmlReaderHandle => ({
       scrollToDecoration: (id) => {
         const element = rootRef.current?.querySelector<HTMLElement>(
           `[data-decoration-ids~="${id}"], [data-decoration-ids^="${id},"], [data-decoration-ids*=",${id},"], [data-decoration-ids$=",${id}"]`,
@@ -173,11 +201,35 @@ export default function MarkdownViewer({
     highlighted?.scrollIntoView?.({ block: "center" });
   }, [highlightRange, restoreScrollPosition, content]);
 
+  /** A link in a document is a destination, never a navigation: the reader is
+   *  the application's own window, and letting a document replace it is how a
+   *  file becomes the last thing the application ever shows. Within the
+   *  document it scrolls; anywhere else the host is asked to open it. */
+  const followLink = (anchor: HTMLAnchorElement) => {
+    const href = anchor.getAttribute("href");
+    if (!href) return;
+    if (href.startsWith("#")) {
+      const id = href.slice(1);
+      const target =
+        rootRef.current?.querySelector<HTMLElement>(`[id="${CSS.escape(ID_PREFIX + id)}"]`) ??
+        rootRef.current?.querySelector<HTMLElement>(`[id="${CSS.escape(id)}"]`);
+      target?.scrollIntoView?.({ block: "start" });
+      return;
+    }
+    openExternal(anchor.hasAttribute(LOCAL_LINK_ATTRIBUTE) ? href : anchor.href);
+  };
+
   return (
     <div
       ref={rootRef}
       onClick={(event) => {
         if (!(event.target instanceof Element)) return;
+        const anchor = event.target.closest<HTMLAnchorElement>("a[href]");
+        if (anchor) {
+          event.preventDefault();
+          followLink(anchor);
+          return;
+        }
         const marked = event.target.closest<HTMLElement>("[data-decoration-ids]");
         const ids = marked?.dataset.decorationIds?.split(",") ?? [];
         if (!marked) return;
@@ -196,20 +248,8 @@ export default function MarkdownViewer({
       className="relative h-full overflow-hidden"
     >
       <div ref={scrollRef} className="h-full overflow-auto px-6 py-5 text-sm text-[var(--text-main)]">
-        <article className="prose prose-document" style={{ fontSize: `${zoom}rem` }}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={rehypePlugins}
-            components={{
-              a: ({ children, href }) => (
-                <a href={href} target="_blank" rel="noreferrer">
-                  {children}
-                </a>
-              ),
-            }}
-          >
-            {content}
-          </ReactMarkdown>
+        <article className="prose prose-document prose-html" style={{ fontSize: `${zoom}rem` }}>
+          {rendered}
         </article>
       </div>
       <SelectionLayer
