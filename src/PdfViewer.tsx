@@ -22,9 +22,9 @@ import FindBar from "./FindBar.js";
 import ZoomControls, { ZOOM_STEP } from "./ZoomControls.js";
 import { getScaledPageHeight, usePdfPageMetrics } from "./usePdfPageMetrics.js";
 import PdfTextLayer from "./PdfTextLayer.js";
-import PdfLinkLayer from "./PdfLinkLayer.js";
+import PdfLinkLayer, { type PageLinks } from "./PdfLinkLayer.js";
 import PdfOutline from "./PdfOutline.js";
-import { usePdfOutline } from "./usePdfOutline.js";
+import { usePdfOutline, type PdfOutlineNode } from "./usePdfOutline.js";
 import { resolveDestination, type PdfDestination } from "./pdfDestinations.js";
 import {
   readPdfScrollPosition,
@@ -84,6 +84,14 @@ export interface PdfViewerProps {
    *  the run the page drew. The canvas is untouched, and so is find-in-page:
    *  searching the page is a question about what is drawn. */
   textSubstitutions?: TextSubstitution[];
+  /** The document's table of contents, when the host holds it rather than the
+   *  file. A book rendered to pages for display carries neither an outline nor
+   *  link annotations -- a page writer emits drawing operations, and neither of
+   *  those is one -- so a host that laid the book out supplies what it already
+   *  resolved. Omitted: read from the document, as a PDF's are. */
+  outline?: PdfOutlineNode[] | null;
+  /** Per-page links, on the same terms as `outline`. */
+  links?: PageLinks[] | null;
   slots?: PdfReaderSlots;
   /** Imperative control — navigation, zoom and find as commands. */
   ref?: Ref<PdfReaderHandle>;
@@ -281,6 +289,8 @@ export default function PdfViewer({
   search_locator = null,
   decorations = [],
   textSubstitutions,
+  outline: suppliedOutline,
+  links: suppliedLinks,
   slots,
   ref,
   onRenderSuccess,
@@ -366,7 +376,7 @@ export default function PdfViewer({
   // torn down and restarted every time the pane changes width mid-measurement.
   const contentWidthRef = useRef(contentWidth);
   const { pageMetrics, hasPageMetrics } = usePdfPageMetrics(pdf, documentKey);
-  const outline = usePdfOutline(pdf);
+  const outline = usePdfOutline(pdf, suppliedOutline);
 
   // Where the reader is, as a page + two ratios rather than as pixels. This is
   // the position of record: `scrollTop`/`scrollLeft` are recomputed from it
@@ -1114,6 +1124,11 @@ export default function PdfViewer({
                     )}
                     {pdf && (
                       <PdfLinkLayer
+                        hostLinks={
+                          suppliedLinks
+                            ? (suppliedLinks.find((entry) => entry.page === pageNum)?.links ?? [])
+                            : undefined
+                        }
                         pdf={pdf}
                         pageNumber={pageNum}
                         scale={pageScale}

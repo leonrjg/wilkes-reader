@@ -4,6 +4,8 @@ import type { PdfDestination } from "./pdfDestinations.js";
 
 export interface PdfOutlineNode {
   title: string;
+  /** Where the entry goes. A host-supplied outline uses a
+   *  {@link HostDestination}, which names its page directly. */
   dest: PdfDestination | null;
   url: string | null;
   items: PdfOutlineNode[];
@@ -31,12 +33,24 @@ function normalize(items: RawOutlineItem[]): PdfOutlineNode[] {
  * via `pdf.getOutline()`. Returns `null` while loading or when the document has
  * no outline, letting callers hide the TOC affordance entirely.
  */
-export function usePdfOutline(pdf: PDFDocumentProxy | null): PdfOutlineNode[] | null {
+export function usePdfOutline(
+  pdf: PDFDocumentProxy | null,
+  supplied?: PdfOutlineNode[] | null,
+): PdfOutlineNode[] | null {
   const [outline, setOutline] = useState<PdfOutlineNode[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setOutline(null);
+    // A host that holds the outline itself is answering a question the
+    // document cannot. A book rendered to pages for display carries no
+    // outline of its own -- a page writer emits drawing operations, and a
+    // table of contents is not one -- so asking the document would report the
+    // book as having none, which is a different claim from the truth.
+    if (supplied) {
+      setOutline(supplied.length > 0 ? supplied : null);
+      return;
+    }
     if (!pdf) return;
 
     pdf
@@ -52,7 +66,7 @@ export function usePdfOutline(pdf: PDFDocumentProxy | null): PdfOutlineNode[] | 
     return () => {
       cancelled = true;
     };
-  }, [pdf]);
+  }, [pdf, supplied]);
 
   return outline;
 }

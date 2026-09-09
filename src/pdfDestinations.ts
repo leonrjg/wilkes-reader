@@ -5,7 +5,36 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
  * (string, resolved via `getDestination`) or an explicit destination array
  * `[pageRef, {name}, ...params]`.
  */
-export type PdfDestination = string | unknown[];
+export type PdfDestination = string | unknown[] | HostDestination;
+
+/**
+ * A destination the host resolved for itself, in page coordinates.
+ *
+ * A pdf.js destination names its page by an internal reference that only
+ * pdf.js can resolve, against the document pdf.js parsed. That is no use to a
+ * host describing a document the reader is not reading: a book laid out to
+ * pages here and rendered for display carries an outline and links that were
+ * resolved against the laid-out document, not against the bytes the reader
+ * received. Such a host already knows the page number, and this is the shape
+ * of saying so.
+ */
+export interface HostDestination {
+  /** 1-based, as the reader's own `goToPage` counts. */
+  page: number;
+  /** Where on that page, in unscaled page units from the top. `null` or
+   *  absent when the destination pins no vertical position. */
+  offsetY?: number | null;
+}
+
+/** Whether a destination is one the host resolved rather than one pdf.js must. */
+export function isHostDestination(dest: PdfDestination): dest is HostDestination {
+  return (
+    typeof dest === "object" &&
+    dest !== null &&
+    !Array.isArray(dest) &&
+    typeof (dest as HostDestination).page === "number"
+  );
+}
 
 export interface ResolvedDestination {
   /** 0-based index of the target page. */
@@ -38,6 +67,17 @@ export async function resolveDestination(
   pdf: PDFDocumentProxy,
   dest: PdfDestination,
 ): Promise<ResolvedDestination | null> {
+  // A host-resolved destination is already the answer; it names a page rather
+  // than a reference into a document this reader may not be holding.
+  if (isHostDestination(dest)) {
+    return {
+      pageIndex: Math.max(0, dest.page - 1),
+      mode: null,
+      offsetX: null,
+      offsetY: dest.offsetY ?? null,
+    };
+  }
+
   const explicit = typeof dest === "string" ? await pdf.getDestination(dest) : dest;
   if (!Array.isArray(explicit) || explicit.length === 0) return null;
 

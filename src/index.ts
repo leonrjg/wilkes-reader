@@ -26,6 +26,17 @@
 export { default as PdfViewer } from "./PdfViewer.js";
 export type { PdfViewerProps, PdfReaderHandle, PdfSelection } from "./PdfViewer.js";
 
+/** What a host supplies when it holds facts the document cannot carry.
+ *
+ *  A document rendered to pages for display -- a book laid out by the host and
+ *  written out so the reader can draw it -- has no outline and no link
+ *  annotations, because a page writer emits drawing operations and neither of
+ *  those is one. The host resolved both against the document it laid out, and
+ *  passes them in rather than leaving the reader to find nothing. */
+export type { HostLink, PageLinks } from "./PdfLinkLayer.js";
+export type { HostDestination } from "./pdfDestinations.js";
+export { isHostDestination } from "./pdfDestinations.js";
+
 export { default as MarkdownViewer } from "./MarkdownViewer.js";
 export type { MarkdownViewerProps, MarkdownReaderHandle } from "./MarkdownViewer.js";
 

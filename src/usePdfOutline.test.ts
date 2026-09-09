@@ -7,6 +7,26 @@ function makePdf(getOutline: () => Promise<unknown>) {
 }
 
 describe("usePdfOutline", () => {
+  it("prefers a host-supplied outline over the document's", async () => {
+    // A book rendered to pages for display carries no outline of its own, so
+    // asking the document would report it as having none -- a different claim
+    // from the truth, and the one thing an EPUB declares better than a PDF.
+    const getOutline = vi.fn();
+    const pdf = { getOutline } as never;
+    const supplied = [{ title: "Segunda regla", dest: { page: 34 }, url: null, items: [] }];
+
+    const { result } = renderHook(() => usePdfOutline(pdf, supplied));
+
+    await waitFor(() => expect(result.current).toEqual(supplied));
+    expect(getOutline).not.toHaveBeenCalled();
+  });
+
+  it("treats an empty host outline as no outline, hiding the affordance", async () => {
+    const pdf = { getOutline: vi.fn() } as never;
+    const { result } = renderHook(() => usePdfOutline(pdf, []));
+    await waitFor(() => expect(result.current).toBeNull());
+  });
+
   it("returns null when the document has no outline", async () => {
     const pdf = makePdf(async () => null);
     const { result } = renderHook(() => usePdfOutline(pdf));

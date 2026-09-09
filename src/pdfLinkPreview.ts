@@ -1,5 +1,9 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { resolveDestination, type PdfDestination } from "./pdfDestinations.js";
+import {
+  isHostDestination,
+  resolveDestination,
+  type PdfDestination,
+} from "./pdfDestinations.js";
 import { loadPdfPageText, type PositionedPdfText } from "./pdfTextContent.js";
 
 export type { PositionedPdfText } from "./pdfTextContent.js";
@@ -45,6 +49,9 @@ function median(values: number[]): number {
 
 function destinationKey(dest: PdfDestination): string {
   if (typeof dest === "string") return `named:${dest}`;
+  // A host destination is already a page and an offset, and two of them are
+  // the same destination exactly when those agree.
+  if (isHostDestination(dest)) return `host:${dest.page}:${dest.offsetY ?? ""}`;
   try {
     return `explicit:${JSON.stringify(dest)}`;
   } catch {

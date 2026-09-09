@@ -18,6 +18,36 @@ function makePdf(overrides: Record<string, unknown> = {}) {
 }
 
 describe("resolveDestination", () => {
+  it("resolves a host destination without consulting the document", async () => {
+    // The point of a host destination: the reader may be drawing a rendering
+    // whose pages pdf.js parsed, while the destination was resolved against
+    // the document the host laid out. Asking pdf.js would be asking the wrong
+    // document, and for a book there is nothing there to ask.
+    const pdf = {
+      getDestination: vi.fn(),
+      getPageIndex: vi.fn(),
+    } as never;
+
+    const resolved = await resolveDestination(pdf, { page: 34, offsetY: 120 });
+
+    expect(resolved).toEqual({
+      pageIndex: 33,
+      mode: null,
+      offsetX: null,
+      offsetY: 120,
+    });
+    expect((pdf as unknown as { getDestination: ReturnType<typeof vi.fn> }).getDestination)
+      .not.toHaveBeenCalled();
+    expect((pdf as unknown as { getPageIndex: ReturnType<typeof vi.fn> }).getPageIndex)
+      .not.toHaveBeenCalled();
+  });
+
+  it("treats a host destination with no offset as pinning no position", async () => {
+    const pdf = { getDestination: vi.fn(), getPageIndex: vi.fn() } as never;
+    const resolved = await resolveDestination(pdf, { page: 1 });
+    expect(resolved).toMatchObject({ pageIndex: 0, offsetY: null });
+  });
+
   it("resolves an explicit XYZ destination to page index and top-left offset", async () => {
     const pdf = makePdf();
     const dest = [{ ref: 1 }, { name: "XYZ" }, 0, 700, null];

@@ -17,9 +17,32 @@ interface LinkRect {
   url: string | null;
 }
 
+/** One link as a host supplies it: where it sits on the page, in unscaled
+ *  page units from the top-left, and where it goes. Exactly one of `page` and
+ *  `url` is meaningful -- an internal target the host already resolved, or an
+ *  external address. */
+export interface HostLink {
+  bbox: { x: number; y: number; width: number; height: number };
+  page?: number | null;
+  offsetY?: number | null;
+  url?: string | null;
+}
+
+/** The links on one page, as a host supplies them. */
+export interface PageLinks {
+  /** 1-based. */
+  page: number;
+  links: HostLink[];
+}
+
 interface Props {
   pdf: PDFDocumentProxy;
   pageNumber: number;
+  /** The links on this page, when the host holds them. A book rendered to
+   *  pages for display carries no link annotations -- a page writer emits
+   *  drawing operations, and an annotation is not one -- so asking the
+   *  document would find none and every footnote would go dead. */
+  hostLinks?: HostLink[];
   /** CSS pixels per PDF unit, i.e. renderedWidth / unscaledPageWidth. */
   scale: number;
   /** Navigate to an in-document GoTo destination. */
@@ -163,6 +186,7 @@ export default function PdfLinkLayer({
   pdf,
   pageNumber,
   scale,
+  hostLinks,
   onNavigateToDestination,
   onOpenExternal,
 }: Props) {
@@ -171,6 +195,29 @@ export default function PdfLinkLayer({
   useEffect(() => {
     let cancelled = false;
     setLinks([]);
+
+    // Host-supplied links are already in page units with a top-left origin,
+    // which is the same frame the annotations are converted into below; only
+    // the render scale separates them from CSS pixels.
+    if (hostLinks) {
+      setLinks(
+        hostLinks
+          .filter((link) => link.page != null || link.url)
+          .map((link, index) => ({
+            key: `host-${index}`,
+            left: link.bbox.x * scale,
+            top: link.bbox.y * scale,
+            width: link.bbox.width * scale,
+            height: link.bbox.height * scale,
+            dest:
+              link.page != null
+                ? { page: link.page, offsetY: link.offsetY ?? null }
+                : null,
+            url: link.url ?? null,
+          })),
+      );
+      return;
+    }
 
     pdf
       .getPage(pageNumber)
@@ -219,7 +266,7 @@ export default function PdfLinkLayer({
     return () => {
       cancelled = true;
     };
-  }, [pdf, pageNumber, scale]);
+  }, [pdf, pageNumber, scale, hostLinks]);
 
   return (
     <>

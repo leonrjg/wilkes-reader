@@ -27,6 +27,65 @@ describe("PdfLinkLayer", () => {
     mockGetPdfLinkPreview.mockResolvedValue(null);
   });
 
+  it("uses host-supplied links and never asks the document", async () => {
+    // A book rendered to pages for display has no link annotations at all --
+    // a page writer emits drawing operations and an annotation is not one --
+    // so asking would find none and every footnote would go dead.
+    const getAnnotations = vi.fn();
+    const pdf = {
+      getPage: vi.fn().mockResolvedValue({ getAnnotations, getViewport: () => ({}) }),
+    } as never;
+
+    render(
+      <PdfLinkLayer
+        pdf={pdf}
+        pageNumber={1}
+        scale={2}
+        hostLinks={[
+          { bbox: { x: 10, y: 20, width: 50, height: 12 }, page: 34, offsetY: 100 },
+          { bbox: { x: 10, y: 40, width: 50, height: 12 }, url: "https://example.com" },
+          { bbox: { x: 0, y: 0, width: 5, height: 5 } },
+        ]}
+        onNavigateToDestination={() => {}}
+        onOpenExternal={() => {}}
+      />,
+    );
+
+    // The third goes nowhere and is not clickable.
+    await waitFor(() => expect(screen.getAllByRole("link")).toHaveLength(2));
+    expect(getAnnotations).not.toHaveBeenCalled();
+
+    // Host boxes are unscaled page units; only the render scale separates
+    // them from CSS pixels.
+    const [internal] = screen.getAllByRole("link");
+    expect(internal).toHaveStyle({ left: "20px", top: "40px", width: "100px", height: "24px" });
+  });
+
+  it("navigates to a host link's page", async () => {
+    const onNavigateToDestination = vi.fn();
+    const pdf = {
+      getPage: vi.fn().mockResolvedValue({
+        getAnnotations: vi.fn().mockResolvedValue([]),
+        getViewport: () => ({}),
+      }),
+    } as never;
+
+    render(
+      <PdfLinkLayer
+        pdf={pdf}
+        pageNumber={1}
+        scale={1}
+        hostLinks={[{ bbox: { x: 0, y: 0, width: 10, height: 10 }, page: 7 }]}
+        onNavigateToDestination={onNavigateToDestination}
+        onOpenExternal={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getAllByRole("link")).toHaveLength(1));
+    fireEvent.click(screen.getAllByRole("link")[0]);
+    expect(onNavigateToDestination).toHaveBeenCalledWith({ page: 7, offsetY: null });
+  });
+
   it("renders overlays only for Link annotations that navigate somewhere", async () => {
     const pdf = makePdf([
       { subtype: "Link", dest: "sec.1", rect: [10, 20, 60, 40] },
