@@ -21,7 +21,7 @@ import type { PositionedSelection } from "./selection.js";
 import SelectionLayer from "./SelectionLayer.js";
 import { useSelectionSlot } from "./selectionSlot.js";
 import { textSelectionFromUtf16Range, utf8ByteRangeToUtf16Range } from "./textOffsets.js";
-import { readTextScrollPosition, saveTextScrollPosition } from "./textScrollMemory.js";
+import { clampTextScrollRatio } from "./readerPositions.js";
 // `Decoration` is CodeMirror's here; the reader contract's is aliased.
 import { elementAnchor, rangeDecorations, type Decoration as ReaderDecoration } from "./decorations.js";
 import type { ReaderSlots } from "./slots.js";
@@ -163,7 +163,8 @@ export default function CodeViewer({
   slots,
   ref,
 }: CodeViewerProps) {
-  const isDark = useReaderHost().colorScheme === "dark";
+  const { colorScheme, positions } = useReaderHost();
+  const isDark = colorScheme === "dark";
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -222,14 +223,18 @@ export default function CodeViewer({
     viewRef.current = view;
     const savePosition = () => {
       const maximum = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight;
-      saveTextScrollPosition(documentPath, "source", maximum > 0 ? view.scrollDOM.scrollTop / maximum : 0);
+      positions.saveTextScroll(
+        documentPath,
+        "source",
+        clampTextScrollRatio(maximum > 0 ? view.scrollDOM.scrollTop / maximum : 0),
+      );
     };
     const onScroll = () => savePosition();
     view.scrollDOM.addEventListener("scroll", onScroll, { passive: true });
 
     let frame: number | null = null;
     if (restoreScrollPosition) {
-      const position = readTextScrollPosition(documentPath, "source");
+      const position = positions.readTextScroll(documentPath, "source");
       if (position !== null) {
         frame = window.requestAnimationFrame(() => {
           view.scrollDOM.scrollTop = position * Math.max(view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight, 0);
@@ -244,7 +249,7 @@ export default function CodeViewer({
       view.destroy();
       viewRef.current = null;
     };
-  }, [content, language, isDark, documentPath, restoreScrollPosition]);
+  }, [content, language, isDark, documentPath, restoreScrollPosition, positions]);
 
   useEffect(() => {
     const view = viewRef.current;

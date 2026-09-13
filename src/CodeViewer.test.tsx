@@ -1,5 +1,6 @@
 import { screen, act, fireEvent } from "@testing-library/react";
 import { renderWithReaderHost as render } from "./testing/readerHarness.js";
+import { createMemoryPositionStore } from "./readerPositions.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import CodeViewer from "./CodeViewer.js";
 import { EditorView } from "@codemirror/view";
@@ -138,5 +139,27 @@ describe("CodeViewer", () => {
       right: 0,
       bottom: 0,
     });
+  });
+
+  it("restores from and saves back to the host's position store", () => {
+    const positions = createMemoryPositionStore();
+    positions.saveTextScroll("/test.ts", "source", 0.4);
+    const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+
+    const { unmount } = render(<CodeViewer {...defaultProps} restoreScrollPosition />, {
+      host: { positions },
+    });
+    // Moved away from the restored place, as a reader scrolling would.
+    positions.saveTextScroll("/test.ts", "source", 0.9);
+    unmount();
+    frame.mockRestore();
+
+    // The mock's scrollable extent is 500px; the restore put it at 200px, and
+    // unmounting records that place back into the same store.
+    expect(positions.readTextScroll("/test.ts", "source")).toBe(0.4);
+    expect(positions.readTextScroll("/test.ts", "rendered")).toBeNull();
   });
 });

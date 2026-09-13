@@ -18,14 +18,7 @@ import { useDomTextFind } from "./useDomTextFind.js";
 import { useReaderHost } from "./ReaderHost.js";
 import { LOCAL_LINK_ATTRIBUTE, markHtmlDocument, parseHtmlDocument } from "./htmlDocument.js";
 import { sourceRunSelection, type TextAnnotation } from "./sourceRuns.js";
-import {
-  readTextScrollPosition,
-  saveTextScrollPosition,
-  readTextZoom,
-  saveTextZoom,
-  TEXT_MIN_ZOOM,
-  TEXT_MAX_ZOOM,
-} from "./textScrollMemory.js";
+import { clampTextScrollRatio, clampTextZoom } from "./readerPositions.js";
 import { useDomDocumentSelection } from "./useDomDocumentSelection.js";
 import { elementAnchor, rangeDecorations, type Decoration } from "./decorations.js";
 import type { ReaderSlots } from "./slots.js";
@@ -73,7 +66,7 @@ export default function HtmlViewer({
   slots,
   ref,
 }: HtmlViewerProps) {
-  const { openExternal, resolveLocalAsset } = useReaderHost();
+  const { openExternal, resolveLocalAsset, positions } = useReaderHost();
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const annotations = useMemo<TextAnnotation[]>(() => [
@@ -105,18 +98,18 @@ export default function HtmlViewer({
     dismissOnCollapsedSelection: true,
   });
 
-  const [zoom, setZoom] = useState(() => readTextZoom(documentPath));
+  const [zoom, setZoom] = useState(() => positions.readTextZoom(documentPath) ?? 1);
   const changeZoom = useCallback((next: (zoom: number) => number) => {
     setZoom((current) => {
-      const clamped = Math.min(Math.max(+next(current).toFixed(2), TEXT_MIN_ZOOM), TEXT_MAX_ZOOM);
-      saveTextZoom(documentPath, clamped);
+      const clamped = clampTextZoom(+next(current).toFixed(2));
+      positions.saveTextZoom(documentPath, clamped);
       return clamped;
     });
-  }, [documentPath]);
+  }, [documentPath, positions]);
 
   // The viewer stays mounted across documents, so pick up the newly opened
   // file's remembered zoom the same way the scroll effect re-reads its position.
-  useEffect(() => setZoom(readTextZoom(documentPath)), [documentPath]);
+  useEffect(() => setZoom(positions.readTextZoom(documentPath) ?? 1), [documentPath, positions]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -153,14 +146,18 @@ export default function HtmlViewer({
 
     const savePosition = () => {
       const maximum = scroll.scrollHeight - scroll.clientHeight;
-      saveTextScrollPosition(documentPath, "rendered", maximum > 0 ? scroll.scrollTop / maximum : 0);
+      positions.saveTextScroll(
+        documentPath,
+        "rendered",
+        clampTextScrollRatio(maximum > 0 ? scroll.scrollTop / maximum : 0),
+      );
     };
     const onScroll = () => savePosition();
     scroll.addEventListener("scroll", onScroll, { passive: true });
 
     let frame: number | null = null;
     if (restoreScrollPosition) {
-      const position = readTextScrollPosition(documentPath, "rendered");
+      const position = positions.readTextScroll(documentPath, "rendered");
       if (position !== null) {
         frame = window.requestAnimationFrame(() => {
           scroll.scrollTop = position * Math.max(scroll.scrollHeight - scroll.clientHeight, 0);
@@ -173,7 +170,7 @@ export default function HtmlViewer({
       savePosition();
       scroll.removeEventListener("scroll", onScroll);
     };
-  }, [content, documentPath, restoreScrollPosition]);
+  }, [content, documentPath, restoreScrollPosition, positions]);
 
   useImperativeHandle(
     ref,

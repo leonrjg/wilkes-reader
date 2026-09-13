@@ -14,7 +14,7 @@ needs, and nothing app-specific crosses back:
 | `decorations` | host → reader | Marks on the document, anchored by page rects or a text range |
 | `slots` | host → reader | Host chrome rendered inside the reader (selection actions, page gutter) |
 | `ref` | host → reader | Navigation, zoom and find as imperative commands |
-| `ReaderHostProvider` | host → reader | Capabilities the readers need: opening a URL, the colour scheme, a URL for a local file |
+| `ReaderHostProvider` | host → reader | Capabilities the readers need: opening a URL, the colour scheme, a URL for a local file, where each document was left |
 
 A `pageGutter` slot declares its own width, and the reader **reserves** it:
 the page is drawn into what is left of the canvas, so host chrome beside a page
@@ -24,6 +24,13 @@ page rather than hanging off its right edge.
 ```ts
 slots={{ pageGutter: { width: 280, render: (page, { scale }) => <Notes … /> } }}
 ```
+
+Where a document was left — a PDF's page, offset and zoom; a text document's
+scroll ratio per surface and its zoom — is captured and restored by the readers
+but kept by the host, through `positions` on the provider. Every call is
+synchronous, because a PDF restores its zoom during its first render. A host
+that keeps positions only as long as the component tree passes
+`createMemoryPositionStore()`; one that persists them answers from a warm copy.
 
 `index.ts` is the whole public surface, in two tiers: the composed readers with
 that contract, and the headless hooks for a host whose reading surface is not a

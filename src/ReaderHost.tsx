@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
+import type { ReaderPositionStore } from "./readerPositions.js";
 
 /** The appearance a reader renders in. The host resolves whatever theme setting
  *  it has ("system", a class on the document, an OS query) down to this. */
@@ -26,6 +27,12 @@ export interface ReaderHostServices {
   /** Target CSS-pixel height for body text when a PDF is first opened.
    *  `undefined` disables auto-zoom. */
   pdfAutoZoomTargetPx?: number;
+  /** Where each document was left, and at what zoom. The readers capture and
+   *  restore the geometry; how long it is kept is the application's decision.
+   *  Keep its identity stable: the text readers re-read their position when it
+   *  changes. A host that keeps nothing past the component tree passes
+   *  `createMemoryPositionStore()`. */
+  positions: ReaderPositionStore;
   /** A URL the application will serve a local file at, for the subresources a
    *  document references -- the images beside an HTML file.
    *

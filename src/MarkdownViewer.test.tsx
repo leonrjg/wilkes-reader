@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { createRef } from "react";
-import { stubSelectionSlot } from "./testing/readerHarness.js";
+import { renderWithReaderHost as render, stubSelectionSlot } from "./testing/readerHarness.js";
 import { describe, expect, it, vi } from "vitest";
 import MarkdownViewer, { type MarkdownReaderHandle } from "./MarkdownViewer.js";
 

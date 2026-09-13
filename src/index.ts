@@ -127,7 +127,20 @@ export {
   textSelectionFromUtf16Range,
 } from "./textOffsets.js";
 
-/** Which surface a text document was last read on. The readers persist and
- *  restore the scroll position per mode; a host that offers the choice needs
- *  the vocabulary. */
-export type { TextViewerMode } from "./textScrollMemory.js";
+/** Where each document was left. The readers capture and restore it; the host
+ *  supplies the store through `ReaderHostServices.positions` and decides how
+ *  long it lasts. `TextViewerMode` is the vocabulary a host that offers both
+ *  surfaces of a text document also needs. */
+export {
+  createMemoryPositionStore,
+  clampTextScrollRatio,
+  clampTextZoom,
+  TEXT_MIN_ZOOM,
+  TEXT_MAX_ZOOM,
+} from "./readerPositions.js";
+export type {
+  ReaderPositionStore,
+  PdfScrollAnchor,
+  PdfScrollPosition,
+  TextViewerMode,
+} from "./readerPositions.js";

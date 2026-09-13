@@ -26,11 +26,7 @@ import PdfLinkLayer, { type PageLinks } from "./PdfLinkLayer.js";
 import PdfOutline from "./PdfOutline.js";
 import { usePdfOutline, type PdfOutlineNode } from "./usePdfOutline.js";
 import { resolveDestination, type PdfDestination } from "./pdfDestinations.js";
-import {
-  readPdfScrollPosition,
-  savePdfScrollPosition,
-  type PdfScrollAnchor,
-} from "./pdfScrollMemory.js";
+import type { PdfScrollAnchor } from "./readerPositions.js";
 import {
   pdfDocumentKey,
   usePdfDocument,
@@ -297,7 +293,12 @@ export default function PdfViewer({
   onLoadError,
   onPageChange,
 }: PdfViewerProps) {
-  const { openExternal, colorScheme, pdfAutoZoomTargetPx: autoZoomTargetPx } = useReaderHost();
+  const {
+    openExternal,
+    colorScheme,
+    pdfAutoZoomTargetPx: autoZoomTargetPx,
+    positions,
+  } = useReaderHost();
   const isDark = colorScheme === "dark";
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -343,7 +344,7 @@ export default function PdfViewer({
   // Restore the reader's last zoom for this document synchronously, so
   // renderedWidth is already correct when the scroll position is restored and
   // auto-zoom (skipped below when a zoom is remembered) never shifts it.
-  const [zoom, setZoom] = useState(() => readPdfScrollPosition(documentKey)?.zoom ?? 1.0);
+  const [zoom, setZoom] = useState(() => positions.readPdf(documentKey)?.zoom ?? 1.0);
   // The parsed document comes from a shared LRU cache (kept alive across
   // unmounts), so navigating back to a recently opened file is instant.
   const pdf = usePdfDocument(source, loadAttempt, onLoadError);
@@ -398,7 +399,7 @@ export default function PdfViewer({
   // remembered zoom means this document was already sized in an earlier mount;
   // pre-mark it so auto-zoom is skipped on reopen and the restored zoom stands.
   const autoZoomedKeyRef = useRef<string | null>(
-    readPdfScrollPosition(documentKey)?.zoom !== undefined ? documentKey : null,
+    positions.readPdf(documentKey)?.zoom !== undefined ? documentKey : null,
   );
 
   useLayoutEffect(() => {
@@ -833,7 +834,7 @@ export default function PdfViewer({
       // always wins over the remembered position.
       const isInitial = prevTarget === null;
       const isDefaultTarget = targetPage === 1 && targetBbox === null;
-      const remembered = isInitial && isDefaultTarget ? readPdfScrollPosition(documentKey) : null;
+      const remembered = isInitial && isDefaultTarget ? positions.readPdf(documentKey) : null;
       if (remembered) {
         restoreScrollPosition(remembered);
       } else {
@@ -868,15 +869,16 @@ export default function PdfViewer({
     isSearchOpen,
     virtualizer,
     documentKey,
+    positions,
     restoreScrollPosition,
     pageMetrics,
     signalInitialRender,
   ]);
 
   // Remember where the reader is as it scrolls, so reopening this document later
-  // in the same session lands back here. Captured live (not on unmount): by the
-  // time an unmounting component's effect cleanup runs, React has already
-  // detached the ref and removed the DOM, leaving nothing to measure.
+  // lands back here for as long as the host's store keeps it. Captured live (not
+  // on unmount): by the time an unmounting component's effect cleanup runs, React
+  // has already detached the ref and removed the DOM, leaving nothing to measure.
   const rememberScrollPosition = useCallback(() => {
     // Ignore the container's own restore-driven scrolls; only genuine user
     // scrolling should update the remembered position.
@@ -885,12 +887,12 @@ export default function PdfViewer({
     if (!container) return;
     const pos = captureScrollPosition(container, contentWidth);
     if (!pos) return;
-    // The anchor of record, and the session memory, are the same measurement:
-    // one is where a reflow puts the reader back, the other is where reopening
-    // the document does.
+    // The anchor of record and the host's stored position are the same
+    // measurement: one is where a reflow puts the reader back, the other is where
+    // reopening the document does.
     anchorRef.current = pos;
-    savePdfScrollPosition(documentKey, { ...pos, zoom });
-  }, [documentKey, zoom, contentWidth]);
+    positions.savePdf(documentKey, { ...pos, zoom });
+  }, [documentKey, positions, zoom, contentWidth]);
 
   useEffect(
     () => () => {

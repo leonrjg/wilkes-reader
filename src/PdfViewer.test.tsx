@@ -3,7 +3,7 @@ import { renderWithReaderHost as render, stubSelectionSlot } from "./testing/rea
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRef, StrictMode } from "react";
 import PdfViewer, { type PdfReaderHandle } from "./PdfViewer.js";
-import { savePdfScrollPosition } from "./pdfScrollMemory.js";
+import { createMemoryPositionStore, type PdfScrollPosition } from "./readerPositions.js";
 
 const { mockVirtualizer } = vi.hoisted(() => ({
   mockVirtualizer: {
@@ -246,6 +246,12 @@ describe("PdfViewer", () => {
   };
   // The auto-zoom target is a host setting; most tests want the default one.
   const defaultHost = { pdfAutoZoomTargetPx: 15.5 };
+  /** A host whose store already holds where an earlier mount left `key`. */
+  const hostRemembering = (key: string, position: PdfScrollPosition) => {
+    const positions = createMemoryPositionStore();
+    positions.savePdf(key, position);
+    return { ...defaultHost, positions };
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1316,9 +1322,9 @@ describe("PdfViewer", () => {
   it("restores the remembered position when a document is reopened plainly", async () => {
     // A prior session left this document at page 3. Reopening it as a plain open
     // (page 1, no highlight target) must land back on page 3, not page 1.
-    savePdfScrollPosition("remembered.pdf", { page: 3, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1 });
+    const host = hostRemembering("remembered.pdf", { page: 3, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1 });
 
-    render(<PdfViewer source="remembered.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host: defaultHost });
+    render(<PdfViewer source="remembered.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host });
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1334,10 +1340,10 @@ describe("PdfViewer", () => {
     // upward. A remembered zoom is now restored synchronously and auto-zoom is
     // skipped, so the view opens exactly where (and how zoomed) it was left --
     // here 150%, not the ~125% the body-text measurement would compute.
-    savePdfScrollPosition("zoomed.pdf", { page: 3, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1.5 });
+    const host = hostRemembering("zoomed.pdf", { page: 3, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1.5 });
     mockPdfDoc.value = sizedDoc(9, 612);
 
-    render(<PdfViewer source="zoomed.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host: defaultHost });
+    render(<PdfViewer source="zoomed.pdf" page={1} highlight_bbox={null} onRenderSuccess={vi.fn()} />, { host });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
@@ -1352,7 +1358,7 @@ describe("PdfViewer", () => {
     // open). When a remembered position lands the viewer deep in the document,
     // page 1 never enters the render window, so the callback never fired and the
     // spinner hung until app restart. It must now fire for the page we land on.
-    savePdfScrollPosition("deep.pdf", { page: 5, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1 });
+    const host = hostRemembering("deep.pdf", { page: 5, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1 });
     mockUsePdfPageMetrics.value = {
       pageMetrics: Array.from({ length: 10 }, () => ({ width: 600, height: 800 })),
       isLoadingPageMetrics: false,
@@ -1368,6 +1374,7 @@ describe("PdfViewer", () => {
     const onRenderSuccess = vi.fn();
     render(
       <PdfViewer source="deep.pdf" page={1} highlight_bbox={null} onRenderSuccess={onRenderSuccess} />,
+      { host },
     );
 
     await act(async () => {
@@ -1380,7 +1387,7 @@ describe("PdfViewer", () => {
   it("lets an explicit navigation target win over the remembered position", async () => {
     // Same remembered page 5, but this open carries an explicit highlight target
     // (a search hit / bookmark). The explicit destination must win.
-    savePdfScrollPosition("explicit.pdf", { page: 3, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1 });
+    const host = hostRemembering("explicit.pdf", { page: 3, offsetRatio: 0, horizontalRatio: 0.5, zoom: 1 });
 
     render(
       <PdfViewer
@@ -1389,6 +1396,7 @@ describe("PdfViewer", () => {
         highlight_bbox={{ x: 1, y: 1, width: 2, height: 2 }}
         onRenderSuccess={vi.fn()}
       />,
+      { host },
     );
 
     await act(async () => {

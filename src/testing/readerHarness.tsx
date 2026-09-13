@@ -7,13 +7,14 @@ import {
 } from "@testing-library/react";
 import { vi, type Mock } from "vitest";
 import { ReaderHostProvider, type ReaderHostServices } from "../ReaderHost.js";
+import { createMemoryPositionStore } from "../readerPositions.js";
 import type { DocumentSelection } from "../selection.js";
 import type { SelectionActionsSlot } from "../slots.js";
 
 /** The one capability the readers ask a host to perform. */
 export const openExternalSpy: Mock = vi.fn();
 
-const DEFAULT_HOST: ReaderHostServices = {
+const DEFAULT_HOST: Omit<ReaderHostServices, "positions"> = {
   openExternal: openExternalSpy,
   colorScheme: "light",
 };
@@ -29,7 +30,13 @@ export function renderWithReaderHost(
 ): RenderResult & { setHost: (patch: Partial<ReaderHostServices>) => void } {
   const { host: initialHost, ...renderOptions } = options;
   const listeners = new Set<() => void>();
-  let value: ReaderHostServices = { ...DEFAULT_HOST, ...initialHost };
+  // A fresh store per render: a position one case leaves behind must not decide
+  // where the next case's reader lands.
+  let value: ReaderHostServices = {
+    ...DEFAULT_HOST,
+    positions: createMemoryPositionStore(),
+    ...initialHost,
+  };
 
   function Wrapper({ children }: { children: ReactNode }) {
     const host = useSyncExternalStore(
