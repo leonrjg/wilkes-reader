@@ -80,7 +80,11 @@ goes to `openExternal`.
 npm install github:leonrjg/wilkes-reader#v0.3.0
 ```
 
-`pdfjs-dist`, `react` and `react-dom` are peer dependencies.
+`pdfjs-dist`, `react` and `react-dom` are peer dependencies. The package loads
+pdf.js' `legacy/` build — library, viewer components and worker alike — because
+the modern one calls JavaScript features (`Map.prototype.getOrInsertComputed`,
+`Math.sumPrecise`) that the webviews hosts ship into do not all have yet.
+`src/pdfjs.ts` is the only module that names a build.
 
 To edit the package alongside an application, link it rather than changing the
 application's manifest — `npm link` touches neither package.json nor the
@@ -197,5 +201,5 @@ transparent by design.
 byte against the installed pdf.js, checks that nothing the rule reads is left
 unsupplied by what the package ships, and checks that every property
 `PdfTextLayer.tsx` computes is still one the stylesheet reads. Re-copy the
-`.textLayer` rule out of `web/pdf_viewer.css` and the tests will tell you what
+`.textLayer` rule out of `legacy/web/pdf_viewer.css` and the tests will tell you what
 else moved.

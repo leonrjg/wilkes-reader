@@ -58,7 +58,7 @@ describe("pdfTextLayer.css", () => {
   it("is verbatim what the installed pdf.js publishes", () => {
     // pdf.js ships its text-layer styles only inside the whole viewer
     // application's stylesheet, so they are extracted rather than imported.
-    expect(vendoredRule).toBe(textLayerRule(readPdfjs("web/pdf_viewer.css")));
+    expect(vendoredRule).toBe(textLayerRule(readPdfjs("legacy/web/pdf_viewer.css")));
   });
 
   it("reads no custom property that nothing this package ships supplies", () => {
@@ -88,7 +88,7 @@ describe("pdfTextLayer.css", () => {
     // These carry the geometry: the stylesheet turns them into font-size and
     // transform. They are what makes the copy load-bearing rather than
     // decorative, so their disappearance should be loud.
-    const runtime = readPdfjs("build/pdf.mjs");
+    const runtime = readPdfjs("legacy/build/pdf.mjs");
     for (const property of ["--font-height", "--scale-x", "--rotate"]) {
       expect(vendoredRule).toContain(`var(${property})`);
       expect(runtime).toContain(`"${property}"`);

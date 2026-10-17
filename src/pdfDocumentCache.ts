@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
-import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
+import { getDocument, GlobalWorkerOptions, PDFJS_WORKER_SRC } from "./pdfjs.js";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "./pdfjs.js";
 import { pdfjsAssetUrls } from "./pdfjsAssetUrls.js";
 
 /**
@@ -99,10 +99,7 @@ export function loadPdfDocument(source: PdfDocumentSource): Promise<PDFDocumentP
   // rather than as a side effect of loading one of the reader components. A
   // host that takes only the headless tier never mounts those, and would get a
   // main-thread parse with nothing to say so.
-  GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    import.meta.url,
-  ).toString();
+  GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
 
   const loadingTask = getDocument({ ...pdfjsReadFrom(source), ...pdfjsAssetUrls() });
   const entry: CacheEntry = { proxy: null, promise: loadingTask.promise, loadingTask };

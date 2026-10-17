@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
-import * as pdfjsLib from "pdfjs-dist";
-import type { PDFDocumentProxy } from "pdfjs-dist";
-import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
+import * as pdfjsLib from "./pdfjs.js";
+import {
+  loadPdfViewerComponents,
+  type PDFDocumentProxy,
+  type TextLayerBuilder,
+} from "./pdfjs.js";
 import { attachWebkitMarginSelection } from "./pdfWebkitSelection.js";
 import { substitutePageText, type TextSubstitution } from "./pdfTextSubstitution.js";
 
@@ -13,9 +16,7 @@ import { substitutePageText, type TextSubstitution } from "./pdfTextSubstitution
 
 let textLayerBuilderPromise: Promise<typeof TextLayerBuilder> | null = null;
 function loadTextLayerBuilder(): Promise<typeof TextLayerBuilder> {
-  textLayerBuilderPromise ??= import("pdfjs-dist/web/pdf_viewer.mjs").then(
-    (m) => m.TextLayerBuilder,
-  );
+  textLayerBuilderPromise ??= loadPdfViewerComponents().then((m) => m.TextLayerBuilder);
   return textLayerBuilderPromise;
 }
 

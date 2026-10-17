@@ -1,4 +1,4 @@
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy } from "./pdfjs.js";
 import type { BoundingBox } from "./documentCoordinates.js";
 import { loadPdfPageText, type PositionedPdfText } from "./pdfTextContent.js";
 

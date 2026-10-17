@@ -36,4 +36,20 @@ describe("module specifiers", () => {
     });
     expect(offenders).toEqual([]);
   });
+
+  it("leave naming a pdf.js build to pdfjs.ts", () => {
+    // The library, viewer components and worker must be one build. A module
+    // that imports `pdfjs-dist` directly pulls the modern build back into the
+    // bundle beside the legacy one, and the webviews that need the legacy one
+    // are exactly where that second copy throws.
+    const PDFJS_SPECIFIER = /(?:\bfrom\s+|\bimport\(\s*|new URL\(\s*)"(pdfjs-dist[^"]*)"/g;
+    const offenders = sourceFiles(join(process.cwd(), "src"))
+      .filter((path) => !path.endsWith("/src/pdfjs.ts"))
+      .flatMap((path) =>
+        [...readFileSync(path, "utf8").matchAll(PDFJS_SPECIFIER)].map(
+          (match) => `${path.split("/src/")[1]}: ${match[1]}`,
+        ),
+      );
+    expect(offenders).toEqual([]);
+  });
 });

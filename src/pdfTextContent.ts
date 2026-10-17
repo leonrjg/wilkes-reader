@@ -1,5 +1,5 @@
 import { installReadableStreamAsyncIterator } from "./readableStreamAsyncIterator.js";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy } from "./pdfjs.js";
 
 export interface PositionedPdfText {
   text: string;

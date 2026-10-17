@@ -108,8 +108,8 @@ vi.mock("./PdfPageCanvas", () => ({
 }));
 
 // The worker URL and AnnotationMode are all PdfViewer itself needs from pdf.js.
-vi.mock("pdfjs-dist", async () => ({
-  ...(await vi.importActual<Record<string, unknown>>("pdfjs-dist")),
+vi.mock("./pdfjs.js", async () => ({
+  ...(await vi.importActual<Record<string, unknown>>("./pdfjs.js")),
   GlobalWorkerOptions: { workerSrc: "" },
 }));
 

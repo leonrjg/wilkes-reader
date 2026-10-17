@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { AnnotationMode } from "pdfjs-dist";
-import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
+import { AnnotationMode } from "./pdfjs.js";
+import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "./pdfjs.js";
 
 /**
  * Renders one page's canvas.

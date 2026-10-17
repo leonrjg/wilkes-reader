@@ -1,10 +1,11 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+import { getDocument, GlobalWorkerOptions, PDFJS_WORKER_SRC } from "./pdfjs.js";
 import { usePdfDocument } from "./pdfDocumentCache.js";
 import { pdfjsAssetUrls } from "./pdfjsAssetUrls.js";
 
-vi.mock("pdfjs-dist", () => ({
+vi.mock("./pdfjs.js", async () => ({
+  ...(await vi.importActual<Record<string, unknown>>("./pdfjs.js")),
   getDocument: vi.fn(),
   GlobalWorkerOptions: { workerSrc: "" },
 }));
@@ -70,6 +71,13 @@ describe("pdfDocumentCache", () => {
 
     await waitFor(() => expect(getDocument).toHaveBeenCalled());
     expect(GlobalWorkerOptions.workerSrc).toContain("pdf.worker");
+  });
+
+  it("runs the worker from the same build as the library", () => {
+    // The worker is its own global scope: polyfills the library carries do not
+    // reach it. The modern worker calls `Math.sumPrecise`, which the webviews
+    // the hosts ship into do not have.
+    expect(PDFJS_WORKER_SRC).toMatch(/\/pdfjs-dist\/legacy\/build\/pdf\.worker\.min\.mjs$/);
   });
 
   describe("a source that is bytes rather than a URL", () => {

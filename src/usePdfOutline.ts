@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy } from "./pdfjs.js";
 import type { PdfDestination } from "./pdfDestinations.js";
 
 export interface PdfOutlineNode {

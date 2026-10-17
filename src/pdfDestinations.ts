@@ -1,4 +1,4 @@
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy } from "./pdfjs.js";
 
 /**
  * A PDF GoTo destination as exposed by pdf.js: either a named destination

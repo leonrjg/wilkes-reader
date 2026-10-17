@@ -1,6 +1,7 @@
 /* Text-layer styles copied verbatim from pdfjs-dist@6.2.108
- * (web/pdf_viewer.css). We render the text layer with pdf.js' own
- * TextLayerBuilder (PdfTextLayer.tsx), so it needs the matching CSS.
+ * (legacy/web/pdf_viewer.css, the build src/pdfjs.ts loads). We render the
+ * text layer with pdf.js' own TextLayerBuilder (PdfTextLayer.tsx), so it needs
+ * the matching CSS.
  *
  * This is not decoration. From 6.x the span geometry lives here: the builder
  * emits `--font-height`, `--scale-x` and `--rotate` on each span and this

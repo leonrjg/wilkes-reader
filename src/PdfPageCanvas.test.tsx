@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AnnotationMode } from "pdfjs-dist";
+import { AnnotationMode } from "./pdfjs.js";
 import PdfPageCanvas from "./PdfPageCanvas.js";
 
 /**

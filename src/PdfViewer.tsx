@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Search as SearchIcon, List } from "react-feather";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy } from "./pdfjs.js";
 import { installReadableStreamAsyncIterator } from "./readableStreamAsyncIterator.js";
 import PdfPageCanvas from "./PdfPageCanvas.js";
 import type { BoundingBox } from "./documentCoordinates.js";
