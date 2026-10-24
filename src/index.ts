@@ -144,3 +144,6 @@ export type {
   PdfScrollPosition,
   TextViewerMode,
 } from "./readerPositions.js";
+
+export { default as ImagePageViewer } from "./ImagePageViewer.js";
+export type { ImagePageSource, ImagePage, ImagePageViewerProps } from "./ImagePageViewer.js";

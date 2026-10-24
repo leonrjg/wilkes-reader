@@ -203,3 +203,21 @@ unsupplied by what the package ships, and checks that every property
 `PdfTextLayer.tsx` computes is still one the stylesheet reads. Re-copy the
 `.textLayer` rule out of `legacy/web/pdf_viewer.css` and the tests will tell you what
 else moved.
+
+### Image page sources
+
+`ImagePageViewer` reads image documents without a PDF conversion. Supply a stable
+`ImagePageSource` with `key`, `pageCount`, and `loadPage(page, signal)`, returning
+`{width, height, image: Blob}`. Dimensions use the host's page coordinate system;
+rectangle decorations use those same units. Key the source by document identity.
+
+The viewer uses the same TanStack virtualizer as the PDF reader, retains visible
+images plus one adjacent page on each side, and limits page requests to two at a
+time. Queued requests are discarded on cancellation. The source must honour the
+abort signal; a running transport keeps its queue slot until it settles. Image
+object URLs are revoked when their page leaves the render window.
+
+Unopened page sizes are estimates. Exact dimensions arrive with each image, and
+layout corrections preserve the current page and fractional scroll position.
+Zoom, remembered positions, page navigation, and rectangle decorations use the
+same host position store and coordinate contract as `PdfViewer`.
