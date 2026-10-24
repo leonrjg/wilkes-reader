@@ -217,6 +217,10 @@ time. Queued requests are discarded on cancellation. The source must honour the
 abort signal; a running transport keeps its queue slot until it settles. Image
 object URLs are revoked when their page leaves the render window.
 
+A page that fails to load or decode shows "Could not load page N" in its own slot and is
+logged to the console; the rest of the document keeps working, and the host's
+`onRenderSuccess` still fires once the first visible page has settled either way.
+
 Unopened page sizes are estimates. Exact dimensions arrive with each image, and
 layout corrections preserve the current page and fractional scroll position.
 Zoom, remembered positions, page navigation, and rectangle decorations use the

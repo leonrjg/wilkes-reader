@@ -156,3 +156,34 @@ describe("image reader controls", () => {
     expect(screen.getByText("130%")).toBeTruthy();
   });
 });
+
+describe("image reader page failures", () => {
+  beforeEach(() => {
+    let id = 0;
+    URL.createObjectURL = vi.fn(() => `blob:fail-${++id}`);
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  const mount = (loader: (page: number) => Promise<ImagePage>, onRenderSuccess = vi.fn()) =>
+    render(<ReaderHostProvider value={{ positions: createMemoryPositionStore(), colorScheme: "light", openExternal: vi.fn() }}>
+      <ImagePageViewer source={{ key: "comic", pageCount: 3, loadPage: loader }} page={1} onRenderSuccess={onRenderSuccess} />
+    </ReaderHostProvider>);
+
+  it("reports a page that cannot be loaded in its own slot and keeps the others", async () => {
+    const onRenderSuccess = vi.fn();
+    mount(async page => { if (page === 1) throw new Error("not an image"); return result(); }, onRenderSuccess);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Could not load page 1"));
+    await waitFor(() => expect(screen.getByAltText("Page 2")).toBeTruthy());
+    // The failed slot is settled: the host's loading state must not wait on it.
+    expect(onRenderSuccess).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it("reports a page whose image cannot be decoded in its own slot", async () => {
+    mount(async () => result());
+    await waitFor(() => expect(screen.getByAltText("Page 1")).toBeTruthy());
+    fireEvent.error(screen.getByAltText("Page 1"));
+    expect(screen.getByRole("alert").textContent).toBe("Could not load page 1");
+    expect(screen.getByAltText("Page 2")).toBeTruthy();
+  });
+});

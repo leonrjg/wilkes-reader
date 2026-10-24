@@ -23,7 +23,6 @@ export interface ImagePageViewerProps {
   decorations?: Decoration[];
   onPageChange?: (page: number) => void;
   onRenderSuccess?: () => void;
-  onLoadError?: (error: unknown) => void;
 }
 
 /** A queue belongs to one open source. Aborted queued jobs never reach the host;
@@ -76,34 +75,46 @@ export function imagePageLayout(count: number, width: number, metrics: ReadonlyM
   });
 }
 
-function ImageSurface({ page, queue, onMetric, onReady, onError }: {
+/** One page's slot. A page that cannot be loaded or decoded says so in its own
+ * slot and nowhere else: the pages around it are still good, so one bad entry
+ * in an archive never takes the document with it. A failed slot counts as
+ * settled, because the reader has drawn all it can for that page. */
+function ImageSurface({ page, queue, onMetric, onSettled }: {
   page: number; queue: ImagePageQueue;
   onMetric: (page: number, metric: ImagePage) => void;
-  onReady: () => void; onError: (error: unknown) => void;
+  onSettled: () => void;
 }) {
   const [url, setUrl] = useState<string | null>(null);
-  const callbacks = useRef({ onMetric, onReady, onError });
-  callbacks.current = { onMetric, onReady, onError };
+  const [failed, setFailed] = useState(false);
+  const callbacks = useRef({ onMetric, onSettled });
+  callbacks.current = { onMetric, onSettled };
+  const fail = (error: unknown) => {
+    console.error(`Could not load page ${page}:`, error);
+    setFailed(true);
+    callbacks.current.onSettled();
+  };
   useEffect(() => {
     const controller = new AbortController();
     let objectUrl: string | null = null;
     setUrl(null);
+    setFailed(false);
     queue.loadPage(page, controller.signal).then(result => {
       if (controller.signal.aborted) return;
       callbacks.current.onMetric(page, result);
       objectUrl = URL.createObjectURL(result.image);
       setUrl(objectUrl);
     }).catch(error => {
-      if (!controller.signal.aborted) callbacks.current.onError(error);
+      if (!controller.signal.aborted) fail(error);
     });
     return () => {
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [page, queue]);
+  if (failed) return <div className="pdf-page-message" role="alert">Could not load page {page}</div>;
   return url ? <img src={url} alt={`Page ${page}`} draggable={false}
-    onLoad={() => callbacks.current.onReady()}
-    onError={() => callbacks.current.onError(new Error(`Could not display page ${page}`))}
+    onLoad={() => callbacks.current.onSettled()}
+    onError={() => fail(new Error(`Could not display page ${page}`))}
     style={{ width: "100%", height: "100%", display: "block", objectFit: "fill" }} />
     : <div className="pdf-page-message">Loading page…</div>;
 }
@@ -114,7 +125,7 @@ export default function ImagePageViewer(props: ImagePageViewerProps) {
   return <ImagePageDocument key={props.source.key} {...props} />;
 }
 
-function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onPageChange, onRenderSuccess, onLoadError }: ImagePageViewerProps) {
+function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onPageChange, onRenderSuccess }: ImagePageViewerProps) {
   const { positions } = useReaderHost();
   const remembered = useRef(positions.readPdf(source.key));
   const [zoom, setZoom] = useState(() => clampZoom(remembered.current?.zoom ?? 1));
@@ -126,8 +137,8 @@ function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onP
   const container = useRef<HTMLDivElement>(null);
   const anchor = useRef<PdfScrollAnchor>(remembered.current && page === 1 && !highlight_bbox
     ? { ...remembered.current, page: landing } : { page: landing, offsetRatio: 0, horizontalRatio: 0.5 });
-  const callbacks = useRef({ onPageChange, onRenderSuccess, onLoadError });
-  callbacks.current = { onPageChange, onRenderSuccess, onLoadError };
+  const callbacks = useRef({ onPageChange, onRenderSuccess });
+  callbacks.current = { onPageChange, onRenderSuccess };
   const queue = useMemo(() => new ImagePageQueue(source.loadPage), [source]);
   const width = Math.max(160, viewport.width) * zoom;
   const layout = useMemo(() => imagePageLayout(source.pageCount, width, metrics), [source.pageCount, width, metrics]);
@@ -223,11 +234,11 @@ function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onP
               setMetrics(previous => {
               if (previous.get(number)?.width === result.width && previous.get(number)?.height === result.height) return previous;
               const next = new Map(previous); next.set(number, { width: result.width, height: result.height }); return next;
-            }); }} onReady={() => {
+            }); }} onSettled={() => {
               if (item.top + item.height > viewport.top && item.top < viewport.top + viewport.height && !initialSignalled.current) {
                 initialSignalled.current = true; callbacks.current.onRenderSuccess?.();
               }
-            }} onError={error => callbacks.current.onLoadError?.(error)} />
+            }} />
             {item.metric && rectDecorationsForPage(decorations, number).map(decoration => {
               const box = unionBox(decoration.anchor.rects);
               return <div key={decoration.id} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
