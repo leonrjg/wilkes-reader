@@ -12,7 +12,7 @@ import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { ByteRange } from "./documentCoordinates.js";
 import SelectionLayer from "./SelectionLayer.js";
 import FindBar from "./FindBar.js";
-import ZoomControls, { ZOOM_STEP } from "./ZoomControls.js";
+import ZoomControls, { ViewerToolbar, ZOOM_STEP } from "./ZoomControls.js";
 import { useDocumentFind } from "./useDocumentFind.js";
 import { useDomTextFind } from "./useDomTextFind.js";
 import { useReaderHost } from "./ReaderHost.js";
@@ -259,16 +259,14 @@ export default function HtmlViewer({
           <FindBar find={find} matchCount={matchCount} />
         </div>
       )}
-      <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-2 items-end">
-        <div className="flex items-center gap-1.5 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-lg shadow-lg px-2.5 py-1.5 text-sm text-[var(--text-main)]">
-          {slots?.toolbar}
-          <ZoomControls
-            zoom={zoom}
-            onZoomIn={() => changeZoom((z) => z + ZOOM_STEP)}
-            onZoomOut={() => changeZoom((z) => z - ZOOM_STEP)}
-          />
-        </div>
-      </div>
+      <ViewerToolbar>
+        {slots?.toolbar}
+        <ZoomControls
+          zoom={zoom}
+          onZoomIn={() => changeZoom((z) => z + ZOOM_STEP)}
+          onZoomOut={() => changeZoom((z) => z - ZOOM_STEP)}
+        />
+      </ViewerToolbar>
     </div>
   );
 }

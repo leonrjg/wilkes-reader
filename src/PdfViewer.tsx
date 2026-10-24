@@ -19,7 +19,7 @@ import { usePdfSearchResult } from "./usePdfSearchResult.js";
 import type { PdfSearchLocator } from "./pdfTextLocator.js";
 import { useDocumentFind } from "./useDocumentFind.js";
 import FindBar from "./FindBar.js";
-import ZoomControls, { ZOOM_STEP } from "./ZoomControls.js";
+import ZoomControls, { PAGE_MAX_ZOOM, PAGE_MIN_ZOOM, PageIndicator, ViewerToolbar, stepPageZoom } from "./ZoomControls.js";
 import { getScaledPageHeight, usePdfPageMetrics } from "./usePdfPageMetrics.js";
 import PdfTextLayer from "./PdfTextLayer.js";
 import PdfLinkLayer, { type PageLinks } from "./PdfLinkLayer.js";
@@ -120,8 +120,6 @@ const PAGE_GAP_PX = 12;
 // A page narrower than this is unreadable, so an over-wide gutter in a narrow
 // pane costs the gutter its full width rather than costing the page the page.
 const MIN_PAGE_WIDTH = 160;
-const PDF_MIN_ZOOM = 0.25;
-const PDF_MAX_ZOOM = 3.0;
 // Keep active find matches away from the very edge of the reader. Besides
 // making the result easier to spot, the top inset prevents a match from sitting
 // underneath the floating find bar. The inset is reduced automatically when a
@@ -970,7 +968,7 @@ export default function PdfViewer({
       getZoom: () => zoom,
       setZoom: (next) =>
         setZoomKeepingPlace(() =>
-          Math.min(PDF_MAX_ZOOM, Math.max(PDF_MIN_ZOOM, +next.toFixed(2))),
+          Math.min(PAGE_MAX_ZOOM, Math.max(PAGE_MIN_ZOOM, +next.toFixed(2))),
         ),
       openFind: (query) => {
         if (query !== undefined) find.setQuery(query);
@@ -1001,41 +999,38 @@ export default function PdfViewer({
         </div>
       )}
 
-      <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-2 items-end">
-        <div className="flex items-center gap-1.5 bg-[var(--bg-app)] border border-[var(--border-main)] rounded-lg shadow-lg px-2.5 py-1.5 text-sm text-[var(--text-main)]">
-          {pdf && (
-            <Tooltip content={outline ? "Table of contents" : "This document has no table of contents"}>
-              <button
-                onClick={() => setIsOutlineOpen((open) => !open)}
-                disabled={!outline}
-                className={`p-1.5 transition-colors mr-1 border-r border-[var(--border-main)] pr-2.5 ${
-                  outline ? "hover:text-[var(--accent-blue)]" : "opacity-40 cursor-default"
-                } ${isOutlineOpen ? "text-[var(--accent-blue)]" : ""}`}
-              >
-                <List size={14} />
-              </button>
-            </Tooltip>
-          )}
-          {!isSearchOpen && (
-            <Tooltip content="Find in document (Cmd+F)">
-              <button
-                onClick={find.open}
-                className="p-1.5 hover:text-[var(--accent-blue)] transition-colors mr-1 border-r border-[var(--border-main)] pr-2.5"
-              >
-                <SearchIcon size={14} />
-              </button>
-            </Tooltip>
-          )}
-          {slots?.toolbar}
-          {numPages && <span className="w-20 text-center font-mono">{currentPage}/{numPages}</span>}
-          {numPages && <span className="text-[var(--text-dim)]">|</span>}
-          <ZoomControls
-            zoom={zoom}
-            onZoomIn={() => setZoomKeepingPlace((z) => Math.min(PDF_MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)))}
-            onZoomOut={() => setZoomKeepingPlace((z) => Math.max(PDF_MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)))}
-          />
-        </div>
-      </div>
+      <ViewerToolbar>
+        {pdf && (
+          <Tooltip content={outline ? "Table of contents" : "This document has no table of contents"}>
+            <button
+              onClick={() => setIsOutlineOpen((open) => !open)}
+              disabled={!outline}
+              className={`p-1.5 transition-colors mr-1 border-r border-[var(--border-main)] pr-2.5 ${
+                outline ? "hover:text-[var(--accent-blue)]" : "opacity-40 cursor-default"
+              } ${isOutlineOpen ? "text-[var(--accent-blue)]" : ""}`}
+            >
+              <List size={14} />
+            </button>
+          </Tooltip>
+        )}
+        {!isSearchOpen && (
+          <Tooltip content="Find in document (Cmd+F)">
+            <button
+              onClick={find.open}
+              className="p-1.5 hover:text-[var(--accent-blue)] transition-colors mr-1 border-r border-[var(--border-main)] pr-2.5"
+            >
+              <SearchIcon size={14} />
+            </button>
+          </Tooltip>
+        )}
+        {slots?.toolbar}
+        {numPages && <PageIndicator page={currentPage} pageCount={numPages} />}
+        <ZoomControls
+          zoom={zoom}
+          onZoomIn={() => setZoomKeepingPlace((z) => stepPageZoom(z, 1))}
+          onZoomOut={() => setZoomKeepingPlace((z) => stepPageZoom(z, -1))}
+        />
+      </ViewerToolbar>
 
       <div className="flex-1 flex min-h-0">
         {isOutlineOpen && outline && (

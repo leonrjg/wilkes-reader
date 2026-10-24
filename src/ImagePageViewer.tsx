@@ -4,7 +4,7 @@ import { useReaderHost } from "./ReaderHost.js";
 import { elementAnchor, rectDecorationsForPage, unionBox, type Decoration } from "./decorations.js";
 import type { BoundingBox } from "./documentCoordinates.js";
 import type { PdfScrollAnchor } from "./readerPositions.js";
-import ZoomControls, { ZOOM_STEP } from "./ZoomControls.js";
+import ZoomControls, { PAGE_MAX_ZOOM, PAGE_MIN_ZOOM, PageIndicator, ViewerToolbar, stepPageZoom } from "./ZoomControls.js";
 
 export interface ImagePage {
   width: number;
@@ -62,7 +62,7 @@ export class ImagePageQueue {
 }
 
 const GAP = 12;
-const clampZoom = (zoom: number) => Math.max(0.25, Math.min(3, zoom));
+const clampZoom = (zoom: number) => Math.max(PAGE_MIN_ZOOM, Math.min(PAGE_MAX_ZOOM, zoom));
 export function imagePageLayout(count: number, width: number, metrics: ReadonlyMap<number, {width: number; height: number}>) {
   const estimate = metrics.values().next().value;
   const ratio = estimate ? estimate.height / estimate.width : 1.4;
@@ -123,7 +123,6 @@ function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onP
   const landing = Math.max(1, Math.min(source.pageCount,
     remembered.current && page === 1 && !highlight_bbox ? remembered.current.page : page));
   const [currentPage, setCurrentPage] = useState(landing);
-  const [jump, setJump] = useState(String(landing));
   const container = useRef<HTMLDivElement>(null);
   const anchor = useRef<PdfScrollAnchor>(remembered.current && page === 1 && !highlight_bbox
     ? { ...remembered.current, page: landing } : { page: landing, offsetRatio: 0, horizontalRatio: 0.5 });
@@ -186,7 +185,6 @@ function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onP
   }, [targetKey]);
   useEffect(() => {
     const timer = setTimeout(() => callbacks.current.onPageChange?.(currentPage), 400);
-    setJump(String(currentPage));
     return () => clearTimeout(timer);
   }, [currentPage]);
   useEffect(() => () => {
@@ -205,16 +203,11 @@ function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onP
     setCurrentPage(centered < 0 ? layout.length : centered + 1);
     setViewport(v => ({ ...v, top: element.scrollTop }));
   };
-  return <div className="flex h-full min-h-0 flex-col">
-    <div className="flex items-center justify-center gap-2 border-b border-[var(--border-main)] px-2 py-1 text-sm">
-      <button aria-label="Previous page" disabled={currentPage <= 1} onClick={() => navigate(currentPage - 1)}>‹</button>
-      <form onSubmit={event => { event.preventDefault(); const value = Number(jump); if (Number.isFinite(value)) navigate(value); }}>
-        <input aria-label="Page number" type="number" min={1} max={source.pageCount} value={jump} onChange={event => setJump(event.target.value)} className="w-14 bg-transparent text-center" />
-        <span> / {source.pageCount}</span>
-      </form>
-      <button aria-label="Next page" disabled={currentPage >= source.pageCount} onClick={() => navigate(currentPage + 1)}>›</button>
-      <ZoomControls zoom={zoom} onZoomIn={() => setZoom(v => clampZoom(v + ZOOM_STEP))} onZoomOut={() => setZoom(v => clampZoom(v - ZOOM_STEP))} />
-    </div>
+  return <div className="relative flex h-full min-h-0 flex-col">
+    <ViewerToolbar>
+      <PageIndicator page={currentPage} pageCount={source.pageCount} />
+      <ZoomControls zoom={zoom} onZoomIn={() => setZoom(v => stepPageZoom(v, 1))} onZoomOut={() => setZoom(v => stepPageZoom(v, -1))} />
+    </ViewerToolbar>
     <div ref={container} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-auto" style={{ overflowAnchor: "none" }}>
       <div style={{ position: "relative", width: Math.max(width, viewport.width), height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map(virtualItem => {

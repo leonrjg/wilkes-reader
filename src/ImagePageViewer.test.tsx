@@ -128,9 +128,10 @@ it("keeps a bounded set of image URLs through distant jumps and return navigatio
   </ReaderHostProvider>);
   await waitFor(() => expect(screen.getByAltText("Page 1")).toBeTruthy());
   for (const page of [100, 213, 1]) {
-    const input = screen.getByLabelText("Page number");
-    fireEvent.change(input, {target: {value: String(page)}});
-    fireEvent.submit(input.closest("form")!);
+    // The host moves the reader by changing `page`; the reader has no controls of its own for it.
+    view.rerender(<ReaderHostProvider value={{positions, colorScheme: "light", openExternal: vi.fn()}}>
+      <ImagePageViewer source={{key: "comic", pageCount: 213, loadPage: loader}} page={page} />
+    </ReaderHostProvider>);
     // jsdom does not dispatch native scroll events for a scrollTop assignment.
     fireEvent.scroll(view.container.querySelector(".overflow-auto")!);
     await waitFor(() => expect(screen.getByAltText(`Page ${page}`)).toBeTruthy());
@@ -138,4 +139,20 @@ it("keeps a bounded set of image URLs through distant jumps and return navigatio
     expect(held).toBeLessThanOrEqual(4);
   }
   expect(loader.mock.calls.length).toBeLessThan(20);
+});
+
+describe("image reader controls", () => {
+  it("offers only the page indicator and zoom of the shared toolbar, with stepped zoom that does not drift", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:page");
+    URL.revokeObjectURL = vi.fn();
+    const positions = createMemoryPositionStore();
+    render(<ReaderHostProvider value={{ positions, colorScheme: "light", openExternal: vi.fn() }}>
+      <ImagePageViewer source={{ key: "comic", pageCount: 3, loadPage: async () => result() }} page={1} />
+    </ReaderHostProvider>);
+    expect(screen.getByText("1/3")).toBeTruthy();
+    expect(screen.queryByLabelText("Page number")).toBeNull();
+    expect(screen.queryByLabelText("Next page")).toBeNull();
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByLabelText("Zoom in"));
+    expect(screen.getByText("130%")).toBeTruthy();
+  });
 });
