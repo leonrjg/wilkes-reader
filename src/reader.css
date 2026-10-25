@@ -88,7 +88,10 @@
    inline style react-pdf hardcoded on its page div. The reader owns that
    element now, so it simply does not set one. */
 
-.pdf-page canvas {
+/* `.pdf-page` is the styling hook for any page-shaped sheet: the PDF reader's
+   canvas, and the image beneath an image-page reader's slot. */
+.pdf-page canvas,
+.pdf-page > img {
   background-color: white; /* Only used in light mode */
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
 }
@@ -140,9 +143,12 @@
   animation-fill-mode: forwards;
 }
 
-.pdf-dark-mode .pdf-page canvas {
+/* The inversion strength is the host's to set (`--pdf-dark-inversion`, 0 to 1);
+   0.9 is the reader's own default. */
+.pdf-dark-mode .pdf-page canvas,
+.pdf-dark-mode .pdf-page > img {
   background-color: white !important;
-  filter: invert(0.9) hue-rotate(180deg) brightness(1.1);
+  filter: invert(var(--pdf-dark-inversion, 0.9)) hue-rotate(180deg) brightness(1.1);
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.5);
 }
 

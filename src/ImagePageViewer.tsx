@@ -126,7 +126,7 @@ export default function ImagePageViewer(props: ImagePageViewerProps) {
 }
 
 function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onPageChange, onRenderSuccess }: ImagePageViewerProps) {
-  const { positions } = useReaderHost();
+  const { positions, colorScheme } = useReaderHost();
   const remembered = useRef(positions.readPdf(source.key));
   const [zoom, setZoom] = useState(() => clampZoom(remembered.current?.zoom ?? 1));
   const [viewport, setViewport] = useState({ width: 600, height: 800, top: 0 });
@@ -219,13 +219,13 @@ function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onP
       <PageIndicator page={currentPage} pageCount={source.pageCount} />
       <ZoomControls zoom={zoom} onZoomIn={() => setZoom(v => stepPageZoom(v, 1))} onZoomOut={() => setZoom(v => stepPageZoom(v, -1))} />
     </ViewerToolbar>
-    <div ref={container} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-auto" style={{ overflowAnchor: "none" }}>
+    <div ref={container} onScroll={onScroll} className={`relative min-h-0 flex-1 overflow-auto ${colorScheme === "dark" ? "pdf-dark-mode" : ""}`} style={{ overflowAnchor: "none" }}>
       <div style={{ position: "relative", width: Math.max(width, viewport.width), height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map(virtualItem => {
           const number = virtualItem.index + 1;
           const item = layout[virtualItem.index];
           const scale = item.metric ? width / item.metric.width : 1;
-          return <div key={number} data-page-number={number} style={{ position: "absolute", top: item.top, left: Math.max(0, (viewport.width - width) / 2), width, height: item.height, background: "white" }}>
+          return <div key={number} data-page-number={number} className="pdf-page" style={{ position: "absolute", top: item.top, left: Math.max(0, (viewport.width - width) / 2), width, height: item.height }}>
             <ImageSurface page={number} queue={queue} onMetric={(number, result) => {
               if (number === anchor.current.page && pendingReveal.current) {
                 anchor.current = { ...anchor.current, offsetRatio: Math.max(0, Math.min(1, pendingReveal.current.y / result.height)) };

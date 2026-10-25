@@ -187,3 +187,26 @@ describe("image reader page failures", () => {
     expect(screen.getByAltText("Page 2")).toBeTruthy();
   });
 });
+
+describe("image reader dark mode", () => {
+  const mountWith = (colorScheme: "light" | "dark") => {
+    URL.createObjectURL = vi.fn(() => "blob:dark");
+    URL.revokeObjectURL = vi.fn();
+    return render(<ReaderHostProvider value={{ positions: createMemoryPositionStore(), colorScheme, openExternal: vi.fn() }}>
+      <ImagePageViewer source={{ key: "comic", pageCount: 2, loadPage: async () => result() }} page={1} />
+    </ReaderHostProvider>);
+  };
+  it("marks its scroller and page slots for the dark-mode inversion the PDF reader uses", async () => {
+    const view = mountWith("dark");
+    await waitFor(() => expect(screen.getByAltText("Page 1")).toBeTruthy());
+    const scroller = view.container.querySelector(".overflow-auto")!;
+    expect(scroller.classList.contains("pdf-dark-mode")).toBe(true);
+    // The stylesheet selects `.pdf-page > img`, so the image must be a direct child of the slot.
+    expect(screen.getByAltText("Page 1").parentElement!.classList.contains("pdf-page")).toBe(true);
+  });
+  it("leaves pages alone in light mode", async () => {
+    const view = mountWith("light");
+    await waitFor(() => expect(screen.getByAltText("Page 1")).toBeTruthy());
+    expect(view.container.querySelector(".pdf-dark-mode")).toBeNull();
+  });
+});
