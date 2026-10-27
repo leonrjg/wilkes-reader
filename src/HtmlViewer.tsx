@@ -13,6 +13,7 @@ import type { ByteRange } from "./documentCoordinates.js";
 import SelectionLayer from "./SelectionLayer.js";
 import FindBar from "./FindBar.js";
 import ZoomControls, { ViewerToolbar, ZOOM_STEP } from "./ZoomControls.js";
+import { useZoomShortcuts } from "./readerShortcuts.js";
 import { useDocumentFind } from "./useDocumentFind.js";
 import { useDomTextFind } from "./useDomTextFind.js";
 import { useReaderHost } from "./ReaderHost.js";
@@ -111,23 +112,11 @@ export default function HtmlViewer({
   // file's remembered zoom the same way the scroll effect re-reads its position.
   useEffect(() => setZoom(positions.readTextZoom(documentPath) ?? 1), [documentPath, positions]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey)) return;
-      if (event.key === "=" || event.key === "+") {
-        event.preventDefault();
-        changeZoom((z) => z + ZOOM_STEP);
-      } else if (event.key === "-") {
-        event.preventDefault();
-        changeZoom((z) => z - ZOOM_STEP);
-      } else if (event.key === "0") {
-        event.preventDefault();
-        changeZoom(() => 1);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [changeZoom]);
+  useZoomShortcuts({
+    zoomIn: () => changeZoom((z) => z + ZOOM_STEP),
+    zoomOut: () => changeZoom((z) => z - ZOOM_STEP),
+    resetZoom: () => changeZoom(() => 1),
+  });
 
   const [matchCount, setMatchCount] = useState(0);
   const find = useDocumentFind(matchCount);

@@ -1,6 +1,6 @@
 {
   "name": "@leonrjg/wilkes-reader",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "Document readers (PDF, Markdown, HTML, source) shared between Wilkes and Underdog.",
   "license": "MIT",
   "repository": "github:leonrjg/wilkes-reader",

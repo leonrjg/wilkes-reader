@@ -356,6 +356,66 @@ describe("PdfViewer", () => {
     expect(screen.getByText("100%")).toBeInTheDocument();
   });
 
+  it("zooms with Cmd/Ctrl plus, minus and zero", async () => {
+    render(<PdfViewer {...defaultProps} />, { host: defaultHost });
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+
+    fireEvent.keyDown(window, { key: "=", metaKey: true });
+    fireEvent.keyDown(window, { key: "=", ctrlKey: true });
+    expect(screen.getByText("120%")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "-", metaKey: true });
+    expect(screen.getByText("110%")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "0", metaKey: true });
+    expect(screen.getByText("100%")).toBeInTheDocument();
+  });
+
+  it("steps pages with the arrow keys from where the reader is", () => {
+    render(<PdfViewer {...defaultProps} highlight_bbox={undefined} />, { host: defaultHost });
+
+    const container = document.querySelector<HTMLElement>(".overflow-auto")!;
+    const firstPage = document.querySelector<HTMLElement>('[data-page-number="1"]')!;
+    const secondPage = document.querySelector<HTMLElement>('[data-page-number="2"]')!;
+    container.getBoundingClientRect = () => domRect(0, 0, 600, 400);
+    // Part-way down page 1.
+    firstPage.getBoundingClientRect = () => domRect(-300, 0, 600, 900);
+    secondPage.getBoundingClientRect = () => domRect(600, 0, 600, 900);
+    mockVirtualizer.scrollToIndex.mockClear();
+
+    fireEvent.keyDown(container, { key: "ArrowRight" });
+    expect(mockVirtualizer.scrollToIndex).toHaveBeenLastCalledWith(1, { align: "start" });
+    expect(screen.getByText("2/10")).toBeInTheDocument();
+
+    // Back from part-way down a page is that page's own top.
+    fireEvent.keyDown(container, { key: "ArrowLeft" });
+    expect(mockVirtualizer.scrollToIndex).toHaveBeenLastCalledWith(0, { align: "start" });
+
+    // Landed on page 2's top, give or take the sub-pixel residue.
+    firstPage.getBoundingClientRect = () => domRect(-899.5, 0, 600, 900);
+    secondPage.getBoundingClientRect = () => domRect(0.5, 0, 600, 900);
+    fireEvent.keyDown(container, { key: "ArrowLeft" });
+    expect(mockVirtualizer.scrollToIndex).toHaveBeenLastCalledWith(0, { align: "start" });
+  });
+
+  it("leaves arrow keys with modifiers or in a text field alone", () => {
+    render(<PdfViewer {...defaultProps} highlight_bbox={undefined} />, { host: defaultHost });
+
+    const container = document.querySelector<HTMLElement>(".overflow-auto")!;
+    const firstPage = document.querySelector<HTMLElement>('[data-page-number="1"]')!;
+    container.getBoundingClientRect = () => domRect(0, 0, 600, 400);
+    firstPage.getBoundingClientRect = () => domRect(0, 0, 600, 900);
+    const field = document.createElement("input");
+    container.appendChild(field);
+    mockVirtualizer.scrollToIndex.mockClear();
+
+    fireEvent.keyDown(container, { key: "ArrowRight", altKey: true });
+    fireEvent.keyDown(container, { key: "ArrowRight", shiftKey: true });
+    fireEvent.keyDown(field, { key: "ArrowRight" });
+    expect(mockVirtualizer.scrollToIndex).not.toHaveBeenCalled();
+  });
+
   it("re-measures the virtualizer when the page it estimates changes size", async () => {
     // Regression, and the subtlest bug this reader has had.
     //

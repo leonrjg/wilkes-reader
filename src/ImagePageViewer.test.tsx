@@ -157,6 +157,41 @@ describe("image reader controls", () => {
   });
 });
 
+describe("image reader keyboard", () => {
+  const mount = () => {
+    URL.createObjectURL = vi.fn(() => "blob:keys");
+    URL.revokeObjectURL = vi.fn();
+    return render(<ReaderHostProvider value={{ positions: createMemoryPositionStore(), colorScheme: "light", openExternal: vi.fn() }}>
+      <ImagePageViewer source={{ key: "comic", pageCount: 3, loadPage: async () => result() }} page={1} />
+    </ReaderHostProvider>);
+  };
+  it("steps pages with the arrow keys and stops at either end", async () => {
+    const view = mount();
+    await waitFor(() => expect(screen.getByAltText("Page 1")).toBeTruthy());
+    const scroller = view.container.querySelector<HTMLElement>(".overflow-auto")!;
+    expect(scroller.tabIndex).toBe(0);
+    fireEvent.keyDown(scroller, { key: "ArrowRight" });
+    fireEvent.keyDown(scroller, { key: "ArrowRight" });
+    fireEvent.keyDown(scroller, { key: "ArrowRight" });
+    expect(screen.getByText("3/3")).toBeTruthy();
+    fireEvent.keyDown(scroller, { key: "ArrowLeft" });
+    expect(screen.getByText("2/3")).toBeTruthy();
+    fireEvent.keyDown(scroller, { key: "ArrowLeft" });
+    fireEvent.keyDown(scroller, { key: "ArrowLeft" });
+    expect(screen.getByText("1/3")).toBeTruthy();
+  });
+  it("zooms with Cmd/Ctrl plus, minus and zero", () => {
+    mount();
+    fireEvent.keyDown(window, { key: "=", metaKey: true });
+    fireEvent.keyDown(window, { key: "+", ctrlKey: true });
+    expect(screen.getByText("120%")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "-", metaKey: true });
+    expect(screen.getByText("110%")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "0", metaKey: true });
+    expect(screen.getByText("100%")).toBeTruthy();
+  });
+});
+
 describe("image reader page failures", () => {
   beforeEach(() => {
     let id = 0;

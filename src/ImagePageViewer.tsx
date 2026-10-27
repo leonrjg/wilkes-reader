@@ -5,6 +5,7 @@ import { elementAnchor, rectDecorationsForPage, unionBox, type Decoration } from
 import type { BoundingBox } from "./documentCoordinates.js";
 import type { PdfScrollAnchor } from "./readerPositions.js";
 import ZoomControls, { PAGE_MAX_ZOOM, PAGE_MIN_ZOOM, PageIndicator, ViewerToolbar, stepPageZoom } from "./ZoomControls.js";
+import { pageStepKeyDown, steppedPage, useZoomShortcuts } from "./readerShortcuts.js";
 
 export interface ImagePage {
   width: number;
@@ -202,6 +203,13 @@ function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onP
     positions.savePdf(source.key, { ...anchor.current, zoom });
   }, [positions, source.key, zoom]);
 
+  useZoomShortcuts({
+    zoomIn: () => setZoom(v => stepPageZoom(v, 1)),
+    zoomOut: () => setZoom(v => stepPageZoom(v, -1)),
+    resetZoom: () => setZoom(1),
+  });
+  const onPageStepKeyDown = pageStepKeyDown(direction => navigate(steppedPage(anchor.current, direction, source.pageCount)));
+
   const onScroll = () => {
     const element = container.current!;
     const index = Math.max(0, layout.findIndex(item => item.top + item.height >= element.scrollTop));
@@ -214,12 +222,12 @@ function ImagePageDocument({ source, page, highlight_bbox, decorations = [], onP
     setCurrentPage(centered < 0 ? layout.length : centered + 1);
     setViewport(v => ({ ...v, top: element.scrollTop }));
   };
-  return <div className="relative flex h-full min-h-0 flex-col">
+  return <div className="relative flex h-full min-h-0 flex-col" onKeyDown={onPageStepKeyDown}>
     <ViewerToolbar>
       <PageIndicator page={currentPage} pageCount={source.pageCount} />
       <ZoomControls zoom={zoom} onZoomIn={() => setZoom(v => stepPageZoom(v, 1))} onZoomOut={() => setZoom(v => stepPageZoom(v, -1))} />
     </ViewerToolbar>
-    <div ref={container} onScroll={onScroll} className={`relative min-h-0 flex-1 overflow-auto ${colorScheme === "dark" ? "pdf-dark-mode" : ""}`} style={{ overflowAnchor: "none" }}>
+    <div ref={container} tabIndex={0} onScroll={onScroll} className={`relative min-h-0 flex-1 overflow-auto outline-none ${colorScheme === "dark" ? "pdf-dark-mode" : ""}`} style={{ overflowAnchor: "none" }}>
       <div style={{ position: "relative", width: Math.max(width, viewport.width), height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map(virtualItem => {
           const number = virtualItem.index + 1;

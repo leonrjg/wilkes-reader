@@ -20,6 +20,7 @@ import type { PdfSearchLocator } from "./pdfTextLocator.js";
 import { useDocumentFind } from "./useDocumentFind.js";
 import FindBar from "./FindBar.js";
 import ZoomControls, { PAGE_MAX_ZOOM, PAGE_MIN_ZOOM, PageIndicator, ViewerToolbar, stepPageZoom } from "./ZoomControls.js";
+import { pageStepKeyDown, steppedPage, useZoomShortcuts } from "./readerShortcuts.js";
 import { getScaledPageHeight, usePdfPageMetrics } from "./usePdfPageMetrics.js";
 import PdfTextLayer from "./PdfTextLayer.js";
 import PdfLinkLayer, { type PageLinks } from "./PdfLinkLayer.js";
@@ -939,6 +940,24 @@ export default function PdfViewer({
     [scrollToPage, pageMetrics, renderedWidth],
   );
 
+  useZoomShortcuts({
+    zoomIn: () => setZoomKeepingPlace((z) => stepPageZoom(z, 1)),
+    zoomOut: () => setZoomKeepingPlace((z) => stepPageZoom(z, -1)),
+    resetZoom: () => setZoomKeepingPlace(() => 1),
+  });
+
+  // Stepped from the live geometry rather than from `anchorRef`, which trails
+  // the scroll by a frame and is not set at all until the reader first scrolls.
+  const onPageStepKeyDown = pageStepKeyDown((direction) => {
+    const container = containerRef.current;
+    if (!container || !numPages) return;
+    const place = captureScrollPosition(container, contentWidth);
+    if (!place) return;
+    const targetPageNumber = steppedPage(place, direction, numPages);
+    scrollToPage(targetPageNumber);
+    setCurrentPage(targetPageNumber);
+  });
+
   useImperativeHandle(
     ref,
     (): PdfReaderHandle => ({
@@ -992,7 +1011,11 @@ export default function PdfViewer({
   );
 
   return (
-    <div ref={rootRef} className="h-full min-h-0 relative flex flex-col overflow-hidden">
+    <div
+      ref={rootRef}
+      className="h-full min-h-0 relative flex flex-col overflow-hidden"
+      onKeyDown={onPageStepKeyDown}
+    >
       {isSearchOpen && (
         <div className="absolute top-4 right-4 z-20">
           <FindBar find={find} matchCount={innerMatches.length} isSearching={isSearching} />
@@ -1043,7 +1066,8 @@ export default function PdfViewer({
         )}
         <div
           ref={containerRef}
-          className={`flex-1 min-w-0 overflow-auto bg-[var(--bg-sidebar)] pr-1 ${isDark ? "pdf-dark-mode" : ""}`}
+          tabIndex={0}
+          className={`flex-1 min-w-0 overflow-auto bg-[var(--bg-sidebar)] pr-1 outline-none ${isDark ? "pdf-dark-mode" : ""}`}
           onMouseUp={domSelection.readSelection}
           onScroll={() => {
             requestAnimationFrame(() => {

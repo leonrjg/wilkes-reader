@@ -32,6 +32,11 @@ synchronous, because a PDF restores its zoom during its first render. A host
 that keeps positions only as long as the component tree passes
 `createMemoryPositionStore()`; one that persists them answers from a warm copy.
 
+The readers claim a few keys. Cmd/Ctrl with `+`, `-` and `0` zoom, listened
+for on the window. Left/Right step the PDF and image readers a page, listened
+for on the reader only — clicking the document focuses it — so a host's own
+lists, tabs and fields keep their arrows.
+
 `index.ts` is the whole public surface, in two tiers: the composed readers with
 that contract, and the headless hooks for a host whose reading surface is not a
 reader — an annotated single-page stage, a thumbnail strip — which would
