@@ -143,12 +143,18 @@
   animation-fill-mode: forwards;
 }
 
-/* The inversion strength is the host's to set (`--pdf-dark-inversion`, 0 to 1);
-   0.9 is the reader's own default. */
+/* How a page is darkened is the host's to set. By default it is inverted, at a
+   strength the host may set (`--pdf-dark-inversion`, 0 to 1; 0.9 is the
+   reader's own default). A host that darkens pages some other way -- dimming
+   them, say -- sets the whole filter instead (`--pdf-dark-filter`), which
+   replaces the inversion. */
 .pdf-dark-mode .pdf-page canvas,
 .pdf-dark-mode .pdf-page > img {
   background-color: white !important;
-  filter: invert(var(--pdf-dark-inversion, 0.9)) hue-rotate(180deg) brightness(1.1);
+  filter: var(
+    --pdf-dark-filter,
+    invert(var(--pdf-dark-inversion, 0.9)) hue-rotate(180deg) brightness(1.1)
+  );
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.5);
 }
 

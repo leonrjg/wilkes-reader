@@ -191,6 +191,11 @@ correctly with no host palette at all. A host overrides those tokens; dark mode
 is a host decision, delivered through `colorScheme` on the provider rather than
 inferred from a class the readers cannot see.
 
+In dark mode a page reader inverts its pages. The host sets how strongly with
+`--pdf-dark-inversion` (0 to 1, default 0.9), or replaces the inversion with a
+filter of its own with `--pdf-dark-filter` — `brightness(0.6)` dims the pages
+instead.
+
 ### Bumping pdf.js
 
 `src/pdfTextLayer.css` is a verbatim copy of pdf.js' own text-layer
