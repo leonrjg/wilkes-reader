@@ -82,14 +82,26 @@ goes to `openExternal`.
 ### Editing a PDF in place
 
 `<PdfViewer editing />` makes a PDF's text something to type in. Nothing on the
-page changes until the reader types: every paragraph has invisible, editable
-text laid over the page's own rendering, so a click puts a caret between two
-letters and an arrow key carries it from one paragraph into the next. The first
-keystroke in a paragraph takes that paragraph — and only that one — from the
-page and sets it as live text, in the runs of type it was in. What follows it
-moves to make room: down the page, into the next column, on to the next page,
-and onto pages appended past the document's end. Enter starts a new paragraph;
-Backspace or Delete at a paragraph's edge joins it to its neighbour.
+page changes until the reader types: every paragraph has invisible text laid
+over the page's own rendering, and the whole document is one editable surface,
+so a click puts a caret between two letters, an arrow key carries it from one
+paragraph into the next, and a selection runs across as many paragraphs as the
+reader drags over. The first keystroke in a paragraph takes that paragraph —
+and only that one — from the page and sets it as live text, in the runs of type
+it was in. What follows it moves to make room: down the page, into the next
+column, on to the next page, and onto pages appended past the document's end.
+When text is taken out, what follows moves back up, across any break the file
+only made because it had run out of room.
+
+- **Enter** starts a new paragraph; **Shift+Enter** breaks a line inside one.
+- **Backspace** or **Delete** at a paragraph's edge joins it to its neighbour in
+  reading order — the next column's, the next page's, the one past a figure.
+- Typing, deleting or cutting over a selection that spans paragraphs leaves one
+  paragraph of what remains.
+- **Cmd/Ctrl+B** and **Cmd/Ctrl+I** make the selection bold or italic, in that
+  face of the font's family.
+- **Escape** gives a paragraph back to the page.
+- **Cmd/Ctrl+click** follows a link; a plain click is for the caret.
 
 **The file is never written by the reader.** An edit is a statement about how
 pages are drawn. A host that wants a file asks for the result and writes it:
@@ -113,8 +125,12 @@ Three things come from the host, all optional:
 | `pdfEdits` — a store for unsaved edits, keyed like `positions` | Edits last as long as the viewer showing them |
 | `textSubstitutions` — the areas the host's reading knows are formulas or tables | Nothing is locked: a formula can be cut between two of its rows, and offered as prose |
 
-The text layer, links, decorations and find describe the pages as the file has
-them, so they are not shown while editing.
+What is marked on the pages — decorations, the find match, the passage the
+reader was sent to — is drawn where the lines it marks are now, which can be
+another page than it names; a link is followed from wherever its line went, and
+a destination is the place it pointed at rather than the place that was. The
+gutter and the selection actions describe the pages as the file has them, and
+are not offered while editing.
 
 It lives in `src/pdfEdit/`, in layers that each know about one thing:
 
@@ -125,31 +141,37 @@ It lives in `src/pdfEdit/`, in layers that each know about one thing:
 | `inkGrid.ts`, `pageLayout.ts` | Reading a page's lines and columns off its raster |
 | `documentFrame.ts` | What only several pages can say: running heads, how far down a page goes, and what the host says is locked |
 | `paragraphs.ts` | Which lines are one paragraph, and the text and runs of type it was set in |
-| `edits.ts` | An edit: replacing a paragraph's lines in the flow, following another edit, what it stood on |
+| `edits.ts` | An edit: replacing a paragraph's lines in the flow, following another edit, standing in for paragraphs joined into it, what it stood on |
+| `typeChange.ts` | Bold and italic, said against what a font already is |
+| `relocation.ts` | Where an area or a point of the original page is drawn now |
 | `editExport.ts`, `typeset.ts` | The edited document as areas and text, read back off the screen |
 | `editStore.ts`, `hostFonts.ts` | What crosses to the host: unsaved edits, and fonts |
 | `pdfPageSource.ts` | The only module that touches pdf.js |
 | `usePdfEditSession.ts` | The state: what is known about the pages, and what was changed |
 | `PdfEditPage.tsx` | The paper: pages recomposed from strips |
 | `PdfEditLayer.tsx`, `PageParagraph.tsx`, `LiveParagraph.tsx` | The text: untouched paragraphs as a caret over the page, changed ones as live text |
+| `editInput.ts`, `caretTravel.ts` | What the keyboard means: which keystrokes are the browser's, and which change the paragraphs |
+| `fragmentFloats.ts` | How one block of live text is made to stand in several places |
 
 What it does not do:
 
-- **Refill a page.** Content moves forward and never back: deleting text leaves
-  room at the foot of its page, because nothing in a PDF says whether the break
-  after it was forced.
-- **Split a paragraph between columns.** An edited paragraph beside another
-  column moves as one block; across a page break in a single column it splits
-  line by line.
-- **Select across paragraphs.** Each paragraph is its own editable element: a
-  caret crosses from one to the next, a selection does not.
-- **Join across a column, a page or a figure.** Two paragraphs become one only
-  where the page set one directly under the other.
-- **Change type.** A paragraph keeps the styles it had; there is no way to make
-  a word bold that was not.
+- **Take back a break the file made on purpose.** Content is pulled back only
+  across a break where the next line would not have fit. A chapter that ends
+  short of its page, or a pair of columns the file balanced, stays as it is —
+  and a page whose last lines were all taken back stays in the document, blank.
+- **Search or mark what was typed.** Find looks through the file's text. A
+  match, a decoration or a link on words that have since been replaced has
+  nowhere to be drawn and is passed over.
+- **Type in a style of its own.** Bold and italic apply to a selection; there
+  is no pending style for the next character, and no change of size or colour.
+- **Fall back for a missing character.** A character the paragraph's font does
+  not have is drawn by the browser in some other font, and is not what a host
+  will be able to save.
 - **Find structure the host did not name.** Paragraphs, columns and running
   heads are found by geometry. A table can be taken for columns, and a scanned
   page is one unbreakable block.
+- **Restart an input method's composition.** A composition begun in a paragraph
+  the page still draws starts over once the paragraph is live text.
 
 ### Installing
 
