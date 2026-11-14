@@ -49,20 +49,26 @@ export function selectText(root: Node, anchor: number, focus: number): void {
   selection.setBaseAndExtent(from.node, from.offset, to.node, to.offset);
 }
 
-/** The line boxes of an element's text, top to bottom. Several client rects
- *  on one line -- one per text node, one per justified word, a superscript
- *  sitting higher than its neighbours -- are one line. */
+/** The line boxes of an element's text, in the order the text runs -- which
+ *  is top to bottom except where a paragraph goes on at the head of the next
+ *  column. Several client rects on one line -- one per text node, one per
+ *  justified word, a superscript sitting higher than its neighbours -- are one
+ *  line. */
 export function lineRects(root: Node): DOMRect[] {
   const range = document.createRange();
-  range.selectNodeContents(root);
   const lines: DOMRect[] = [];
-  for (const rect of range.getClientRects()) {
+  // Text node by text node: a range over the whole element would also report
+  // the boxes of the elements in it, and those not in the order of the text.
+  const rects = textNodes(root).flatMap((node) => {
+    range.selectNodeContents(node);
+    return [...range.getClientRects()];
+  });
+  for (const rect of rects) {
     if (rect.height === 0) continue;
-    const line = lines.find((candidate) => {
-      const overlap = Math.min(candidate.bottom, rect.bottom) - Math.max(candidate.top, rect.top);
-      return overlap > Math.min(candidate.height, rect.height) / 2;
-    });
-    if (!line) {
+    const line = lines[lines.length - 1];
+    const overlap = line ? Math.min(line.bottom, rect.bottom) - Math.max(line.top, rect.top) : 0;
+    // Further along the same line, not back at the start of one beside it.
+    if (!line || overlap <= Math.min(line.height, rect.height) / 2 || rect.right < line.left) {
       lines.push(DOMRect.fromRect(rect));
       continue;
     }
@@ -75,7 +81,7 @@ export function lineRects(root: Node): DOMRect[] {
     line.width = right - left;
     line.height = bottom - top;
   }
-  return lines.sort((a, b) => a.top - b.top);
+  return lines;
 }
 
 /** Where the caret is on screen, or null when the selection is a range or the

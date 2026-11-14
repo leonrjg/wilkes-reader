@@ -8,6 +8,7 @@ import {
   type EditFragment,
   type ParagraphEdit,
 } from "./edits.js";
+import { layoutFragments, type FragmentBox } from "./fragmentFloats.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
 import { lineHeightPx, liveFace, paragraphTextStyle } from "./paragraphStyle.js";
 import { readRuns, restyleRuns, styleIndexOf, textOfRuns, writeRuns } from "./styledText.js";
@@ -23,24 +24,15 @@ import { joinNeighbour, type Handoff, type PdfEditSession } from "./usePdfEditSe
  * breaking: the reflow engine is told how many lines the text wrapped to and
  * never wraps anything itself, which is what keeps the two from disagreeing.
  *
- * A paragraph split across a page break is still one block of text. What makes
- * its lines skip the foot of one page and resume at the head of the next is a
- * float as wide as the block, sized to exactly that distance, which no line
- * box fits beside. Floats can move later lines down and sideways but never
- * back up, which is why a paragraph beside another column is not split.
+ * A paragraph whose lines stand in more than one place -- across a page break,
+ * across two columns -- is still one block of text; `fragmentFloats` is what
+ * makes its lines skip from each place to the next.
  */
 
 interface LiveParagraphProps {
   session: PdfEditSession;
   edit: ParagraphEdit;
   geometryOf: (page: number) => PageGeometry | null;
-}
-
-/** A fragment of a paragraph, in CSS px within the scrolled content. */
-interface Box {
-  left: number;
-  top: number;
-  lines: number;
 }
 
 /** Extra width on the text box, so a line the page set full is not wrapped by
@@ -50,10 +42,6 @@ const WIDTH_SLACK_PX = 1;
  *  DOM. Long enough not to run on every keystroke, short enough that little is
  *  lost if the reader leaves. */
 const REMEMBER_DELAY_MS = 400;
-/** How much taller a fragment's spacer is than its lines. Any positive amount
- *  under a line height keeps a fragment's last line clear of the float below. */
-const FLOAT_SLACK_PX = 0.5;
-
 export default function LiveParagraph({ session, edit, geometryOf }: LiveParagraphProps) {
   const textRef = useRef<HTMLDivElement>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
@@ -66,7 +54,7 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
   const boxes = fragmentBoxes(session.fragmentsOf(edit), geometryOf);
   // A cascade waiting on a page's analysis has not placed this paragraph yet.
   // The text stays mounted where it last was: unmounting would drop the caret.
-  const lastBoxes = useRef<Box[]>([]);
+  const lastBoxes = useRef<FragmentBox[]>([]);
   if (boxes.length > 0) lastBoxes.current = boxes;
   const shown = lastBoxes.current;
 
@@ -216,33 +204,36 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
     return () => document.fonts.removeEventListener("loadingdone", measure);
   }, [measure]);
 
-  const left = Math.min(...shown.map((box) => box.left));
-  const widest = Math.max(...shown.map((box) => box.left)) - left;
+  const layout = layoutFragments(shown, lineHeight, textWidth);
+  const columned = layout.columns > 1;
 
   return (
     <div
       className="pdf-edit-block"
       style={{
-        left: shown.length > 0 ? left : 0,
-        top: shown[0]?.top ?? 0,
-        width: textWidth + (shown.length > 0 ? widest : 0),
+        left: layout.left,
+        top: layout.top,
         visibility: shown.length > 0 ? "visible" : "hidden",
+        ...(columned
+          ? { width: layout.columns, height: layout.columnHeight, columnCount: layout.columns }
+          : { width: layout.width }),
       }}
     >
-      {shown.map((box, index) => {
-        const next = shown[index + 1];
-        const height = box.lines * lineHeight;
-        const indent = box.left - left;
-        return (
-          <FragmentFloats
-            key={index}
-            height={height + FLOAT_SLACK_PX}
-            indentLeft={indent}
-            indentRight={widest - indent}
-            gapBelow={next ? next.top - (box.top + height) - FLOAT_SLACK_PX : 0}
-          />
-        );
-      })}
+      {/* Always there, so the text is never mounted afresh -- and the caret
+          dropped -- when a paragraph comes to span two columns. */}
+      <div style={columned ? { width: layout.width } : undefined}>
+      {layout.floats.map((float, index) => (
+        <div
+          key={index}
+          className="pdf-edit-float"
+          style={{
+            float: float.side,
+            clear: float.clear ? "both" : "none",
+            width: float.width,
+            height: float.height,
+          }}
+        />
+      ))}
       <div
         ref={textRef}
         className="pdf-edit-text"
@@ -297,6 +288,7 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
       <div className="pdf-edit-probe" style={textStyle} aria-hidden>
         <span ref={probeRef} />
       </div>
+      </div>
     </div>
   );
 }
@@ -314,42 +306,11 @@ function receive(text: HTMLElement, handoff: Handoff): void {
   }
 }
 
-/** The floats that confine one fragment's lines to its place: a spacer down
- *  its left as tall as its lines, a second down its right when a later
- *  fragment sits further in, and below both a full-width float across the
- *  distance to the next fragment. */
-function FragmentFloats({
-  height,
-  indentLeft,
-  indentRight,
-  gapBelow,
-}: {
-  height: number;
-  indentLeft: number;
-  indentRight: number;
-  gapBelow: number;
-}) {
-  return (
-    <>
-      <div className="pdf-edit-float" style={{ float: "left", clear: "both", width: indentLeft, height }} />
-      {indentRight > 0 && (
-        <div className="pdf-edit-float" style={{ float: "right", width: indentRight, height }} />
-      )}
-      {gapBelow > 0 && (
-        <div
-          className="pdf-edit-float"
-          style={{ float: "left", clear: "both", width: "100%", height: gapBelow }}
-        />
-      )}
-    </>
-  );
-}
-
 function fragmentBoxes(
   fragments: EditFragment[],
   geometryOf: (page: number) => PageGeometry | null,
-): Box[] {
-  const boxes: Box[] = [];
+): FragmentBox[] {
+  const boxes: FragmentBox[] = [];
   for (const fragment of fragments) {
     const geometry = geometryOf(fragment.page);
     if (!geometry) continue;

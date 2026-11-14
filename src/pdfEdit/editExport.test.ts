@@ -7,6 +7,7 @@ function slice(page: number, index: number, y: number): FlowItem {
     id: `${page}:${index}`,
     height: 10,
     gapBefore: 2,
+    leading: 0,
     trailing: 0,
     content: { kind: "slice", page, rect: { x: 50, y, width: 200, height: 10 } },
   };

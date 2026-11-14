@@ -247,16 +247,20 @@ function fillRegion(
 
   region.columns.forEach((column, columnIndex) => {
     const items = displaced.length > 0 ? [...displaced, ...waiting[columnIndex]] : waiting[columnIndex];
+    // Where the ink of the column's first item goes, then the foot of the
+    // last item placed.
     let cursor = displaced.length > 0 ? 0 : column.lead;
-    let held = 0;
+    let above: FlowItem | null = null;
     const place = (item: FlowItem, within: number, forced: boolean): boolean => {
-      const itemTop = held === 0 ? cursor : cursor + item.gapBefore;
+      const itemTop = above ? cursor - above.trailing + item.gapBefore : cursor - item.leading;
       if (itemTop + item.height - item.trailing > within + EPSILON && !forced) return false;
       placed.push({ item, column: columnIndex, offset: itemTop });
       cursor = itemTop + item.height;
-      held++;
+      above = item;
       return true;
     };
+    /** Where the column's ink ends. */
+    const foot = () => cursor - (above?.trailing ?? 0);
 
     let own = 0;
     while (own < items.length && place(items[own], limit, mustPlaceFirst && placed.length === 0)) own++;
@@ -266,7 +270,7 @@ function fillRegion(
       const next = region.columns[columnIndex + 1];
       if (!next) {
         while (taken < following.length && place(following[taken], refillLimit, false)) taken++;
-        spare = refillLimit - cursor;
+        spare = refillLimit - foot();
       } else if (runsOn(column, next)) {
         const source = waiting[columnIndex + 1];
         let pulled = 0;
@@ -274,7 +278,7 @@ function fillRegion(
         waiting[columnIndex + 1] = source.slice(pulled);
       }
     }
-    if (held > 0) height = Math.max(height, cursor);
+    if (above) height = Math.max(height, foot());
   });
 
   if (displaced.length === 0) return { placed, height, rest: null, taken, spare };

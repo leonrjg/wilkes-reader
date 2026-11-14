@@ -13,6 +13,7 @@ function column(page: number, name: string, x: number, count: number, top: numbe
     id: `${page}:${name}:${index}`,
     height: LINE,
     gapBefore: GAP,
+    leading: 0,
     trailing: 0,
     content: {
       kind: "slice",
@@ -47,7 +48,7 @@ function tops(flow: PageFlow, carried = []) {
 }
 
 /** A paragraph covering lines `from..to` of a single-column page. */
-function paragraph(flow: PageFlow, from: number, to: number, splittable = true): Paragraph {
+function paragraph(flow: PageFlow, from: number, to: number): Paragraph {
   const items = flow.regions[0].columns[0].items.slice(from, to);
   const first = items[0].content;
   if (first.kind !== "slice") throw new Error("expected a slice");
@@ -55,7 +56,6 @@ function paragraph(flow: PageFlow, from: number, to: number, splittable = true):
     page: flow.page,
     itemIds: items.map((item) => item.id),
     area: { x: first.rect.x, y: first.rect.y, width: 200, height: items.length * (LINE + GAP) - GAP },
-    splittable,
     text: "",
     runs: [],
     styles: [{ fontName: "f", fontSize: 10, color: "black", rise: 0 }],
@@ -77,8 +77,8 @@ function paragraph(flow: PageFlow, from: number, to: number, splittable = true):
   };
 }
 
-function edited(flow: PageFlow, from: number, to: number, lineCount: number, splittable = true) {
-  return { ...createEdit("e", paragraph(flow, from, to, splittable)), lineCount, ascent: 8 };
+function edited(flow: PageFlow, from: number, to: number, lineCount: number) {
+  return { ...createEdit("e", paragraph(flow, from, to)), lineCount, ascent: 8 };
 }
 
 describe("layoutPage", () => {
@@ -358,11 +358,13 @@ describe("reflowDocument", () => {
     ]);
   });
 
-  it("moves a paragraph that cannot be split as one block", () => {
-    const first = page(1, [column(1, "a", 50, 20, 100)]);
-    const second = page(2, [column(2, "a", 50, 10, 100)]);
-    const edit = edited(first, 18, 20, 5, false);
-    const reflow = reflowDocument((n) => applyEdits(flows([first, second])(n), [edit]), [1], 2);
-    expect(editFragments(edit, reflow.plans)).toEqual([{ page: 2, x: 50, y: 100, lines: 5 }]);
+  it("splits an edited paragraph between the foot of one column and the head of the next", () => {
+    const flow = page(1, [column(1, "l", 50, 20, 100), column(1, "r", 300, 10, 100)]);
+    const edit = edited(flow, 18, 20, 5);
+    const reflow = reflowDocument((n) => applyEdits(flows([flow])(n), [edit]), [1], 1);
+    expect(editFragments(edit, reflow.plans)).toEqual([
+      { page: 1, x: 50, y: 100 + 18 * 12, lines: 2 },
+      { page: 1, x: 300, y: 100, lines: 3 },
+    ]);
   });
 });

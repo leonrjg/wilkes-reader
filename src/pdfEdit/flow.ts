@@ -31,13 +31,17 @@ export interface FlowItem {
   /** Stable across re-analysis, so an edit can name the items it replaced. */
   id: string;
   height: number;
-  /** Space above this item when another item precedes it in its column. Not
-   *  applied to the first item of a column, whose place is the column's. */
+  /** Space between the ink of the item above this one in its column and this
+   *  item's top. Not applied to the first item of a column, whose place is the
+   *  column's. */
   gapBefore: number;
-  /** How much of the item's foot is empty. It counts toward where the next
-   *  item goes, but may hang past the body's bottom: a line box is taller than
-   *  the ink of its line, and a page is full when its ink reaches the bottom,
-   *  not when the leading under its last line does. */
+  /** How much of the item's head is empty. A line box is taller than the ink
+   *  of its line; at the head of a column it is the ink that goes where the
+   *  column starts, and the box stands that much above it. */
+  leading: number;
+  /** How much of the item's foot is empty. The item after it is spaced from
+   *  the ink, and a page is full when its ink reaches the bottom, not when the
+   *  leading under its last line does: this much may hang past it. */
   trailing: number;
   content: FlowContent;
 }

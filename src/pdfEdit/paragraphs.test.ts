@@ -12,6 +12,7 @@ function line(index: number, top: number, text: string, left = LEFT, right = RIG
     id: `1:0:0:${index}`,
     height: 8,
     gapBefore: 4,
+    leading: 0,
     trailing: 0,
     content: { kind: "slice", page: 1, rect: { x: LEFT, y: top, width: RIGHT - LEFT, height: 8 } },
   };
@@ -51,7 +52,6 @@ describe("paragraphsOf", () => {
       inset: 0,
       width: 200,
       align: "justify",
-      splittable: true,
     });
     // Where each line went in the joined text: the first lost its hyphen.
     expect(paragraph.lines.map(({ itemId, start, kept, baselineOffset }) => [itemId, start, kept, baselineOffset])).toEqual([

@@ -47,10 +47,17 @@
   position: absolute;
   display: flow-root;
   pointer-events: none;
+  /* For a paragraph that spans two columns of a page, which is set in a
+     multi-column container of its own (see `fragmentFloats`). */
+  column-gap: 0;
+  column-fill: auto;
 }
 
+/* Never cut in two by a column's foot: one that does not fit under what is
+   above it starts the next column whole. */
 .pdf-edit-float {
   pointer-events: none;
+  break-inside: avoid;
 }
 
 /* Deliberately not a formatting context of its own (no overflow, no

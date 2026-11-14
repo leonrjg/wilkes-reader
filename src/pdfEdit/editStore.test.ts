@@ -5,7 +5,6 @@ const paragraph = {
   page: 2,
   itemIds: ["2:0:0:3"],
   area: { x: 50, y: 100, width: 200, height: 30 },
-  splittable: true,
   text: "Some words.",
   runs: [{ text: "Some words.", style: 0 }],
   styles: [{ fontName: "f1", fontSize: 10, color: "black", rise: 0 }],

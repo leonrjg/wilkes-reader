@@ -167,6 +167,7 @@ function flowColumn(
     id: `${idPrefix}:${piece.firstBand}`,
     height: piece.bottom - piece.top,
     gapBefore: index === 0 ? typicalGap : gaps[index - 1],
+    leading: 0,
     trailing: 0,
     content: {
       kind: "slice",

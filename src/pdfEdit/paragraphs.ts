@@ -71,9 +71,6 @@ export interface Paragraph {
   /** The part of the page those items cover: the paragraph's lines, and with
    *  them whatever it stands on -- a tint, a border, a rule beside it. */
   area: BoundingBox;
-  /** False where the paragraph sits beside another column: its lines cannot
-   *  then be split between two places, and it moves as one block. */
-  splittable: boolean;
   text: string;
   /** The same text, as the runs of type it is set in. A paragraph is rarely
    *  one style: an italic phrase, a citation raised above the line, a symbol
@@ -138,7 +135,7 @@ export function paragraphsOf(flow: PageFlow, runs: TextRun[]): Paragraph[] {
   const paragraphs: Paragraph[] = [];
   for (const region of flow.regions) {
     for (const column of region.columns) {
-      paragraphs.push(...columnParagraphs(flow.page, column, runs, region.columns.length === 1));
+      paragraphs.push(...columnParagraphs(flow.page, column, runs));
     }
   }
   return paragraphs;
@@ -148,7 +145,6 @@ function columnParagraphs(
   page: number,
   column: FlowColumn,
   runs: TextRun[],
-  splittable: boolean,
 ): Paragraph[] {
   const lined = column.items.map((item) => ({ item, lines: linesOf(item, runs) }));
   const allLines = lined.flatMap((entry) => entry.lines);
@@ -170,7 +166,7 @@ function columnParagraphs(
     // would let the reader re-wrap a sentence with a hole in it.
     const locked = group.some(({ item }) => item.content.kind === "slice" && item.content.locked);
     if (group.length > 0 && !locked) {
-      paragraphs.push(paragraphFrom(page, group, column, columnRight, splittable));
+      paragraphs.push(paragraphFrom(page, group, column, columnRight));
     }
     group = [];
   };
@@ -376,7 +372,6 @@ function paragraphFrom(
   group: Array<{ item: FlowItem; lines: Line[] }>,
   column: FlowColumn,
   columnRight: number,
-  splittable: boolean,
 ): Paragraph {
   const lines = group.flatMap((entry) => entry.lines);
   const itemOf = group.flatMap((entry) => entry.lines.map(() => entry.item));
@@ -410,7 +405,6 @@ function paragraphFrom(
     page,
     itemIds: group.map((entry) => entry.item.id),
     area: { x: column.x, y: areaTop, width: column.width, height: areaBottom - areaTop },
-    splittable,
     text: joined.text,
     runs,
     styles,

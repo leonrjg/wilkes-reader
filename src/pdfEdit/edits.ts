@@ -152,9 +152,10 @@ function insertFollowing(column: FlowColumn, following: readonly ParagraphEdit[]
       // The space the page left after the paragraph this follows is the space
       // between paragraphs here, so it is what goes before the new one too.
       const gap = next ? next.gapBefore : edit.paragraph.lineHeight / 2;
+      const { leading, trailing } = items[anchor];
       items = [
         ...items.slice(0, anchor + 1),
-        ...editItems(edit, gap, items[anchor].trailing),
+        ...editItems(edit, gap, leading, trailing),
         ...items.slice(anchor + 1),
       ];
       placed.push(edit);
@@ -177,8 +178,9 @@ function replaceParagraph(column: FlowColumn, edit: ParagraphEdit): FlowColumn {
   // The strips were ink: they began at a line's ascenders and ended at its
   // descenders. Line boxes are taller than their ink, so the paragraph's box
   // starts a little above the first strip and ends a little below the last.
-  // Both differences come off the gaps on either side, which is what puts an
-  // edit that changed nothing exactly where the page drew it.
+  // Each line says how much of its head and foot is empty, which is what puts
+  // an edit that changed nothing exactly where the page drew it -- and its
+  // ink, not its box, at the head or foot of a column it is moved to.
   const top = paragraph.firstBaseline - ascentOf(edit);
   const inkTop = first.content.rect.y;
   const inkBottom = last.content.rect.y + last.content.rect.height;
@@ -186,33 +188,27 @@ function replaceParagraph(column: FlowColumn, edit: ParagraphEdit): FlowColumn {
   const originalBottom = paragraph.lastBaseline - ascentOf(edit) + paragraph.lineHeight;
   const drop = originalBottom - inkBottom;
 
-  const lines = editItems(edit, first.gapBefore - raise, Math.max(0, drop));
-  const after = column.items.slice(end);
-  if (after.length > 0) after[0] = { ...after[0], gapBefore: after[0].gapBefore - drop };
   return {
     ...column,
-    lead: start === 0 ? column.lead - raise : column.lead,
-    items: [...column.items.slice(0, start), ...lines, ...after],
+    items: [
+      ...column.items.slice(0, start),
+      ...editItems(edit, first.gapBefore - raise, raise, drop),
+      ...column.items.slice(end),
+    ],
   };
 }
 
-function editItems(edit: ParagraphEdit, gapBefore: number, trailing: number): FlowItem[] {
-  const { lineHeight, splittable } = edit.paragraph;
-  if (!splittable) {
-    return [
-      {
-        id: `${edit.id}:0`,
-        height: edit.lineCount * lineHeight,
-        gapBefore,
-        trailing,
-        content: { kind: "edit", editId: edit.id, line: 0, lines: edit.lineCount },
-      },
-    ];
-  }
+/** An edit's lines as items: one each, so a paragraph can be cut between any
+ *  two of them by the foot of a column or a page. */
+function editItems(edit: ParagraphEdit, gapBefore: number, leading: number, trailing: number): FlowItem[] {
+  const { lineHeight } = edit.paragraph;
   return Array.from({ length: edit.lineCount }, (_, line) => ({
     id: `${edit.id}:${line}`,
     height: lineHeight,
-    gapBefore: line === 0 ? gapBefore : 0,
+    // A gap is measured from ink: a line box goes directly under the box of
+    // the line above by being that line's empty foot away from its ink.
+    gapBefore: line === 0 ? gapBefore : trailing,
+    leading,
     trailing,
     content: { kind: "edit" as const, editId: edit.id, line, lines: 1 },
   }));

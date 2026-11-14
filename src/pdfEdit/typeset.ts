@@ -93,12 +93,15 @@ export function typesetText(input: TypesetInput): TypesetText[] {
 
 const inked = (rects: DOMRectList) => [...rects].filter((rect) => rect.width > 0 && rect.height > 0);
 
-/** The line a word is on: the one its box overlaps most. A raised word's box
- *  sits high, and can reach into the line above. */
+/** The line a word is on: of those it is within the width of, the one its box
+ *  overlaps most. A raised word's box sits high, and can reach into the line
+ *  above; and a line in the next column can be level with this one. */
 function nearestLine(lines: DOMRect[], rect: DOMRect): number {
+  const centre = (rect.left + rect.right) / 2;
   let best = 0;
   let bestOverlap = -Infinity;
   lines.forEach((line, index) => {
+    if (centre < line.left || centre > line.right) return;
     const overlap = Math.min(line.bottom, rect.bottom) - Math.max(line.top, rect.top);
     if (overlap > bestOverlap) {
       best = index;
