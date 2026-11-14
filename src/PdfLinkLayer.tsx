@@ -7,7 +7,7 @@ import {
 } from "./pdfLinkPreview.js";
 import { Tooltip } from "./Tooltip.js";
 
-interface LinkRect {
+export interface LinkRect {
   key: string;
   left: number;
   top: number;
@@ -195,74 +195,14 @@ export default function PdfLinkLayer({
   useEffect(() => {
     let cancelled = false;
     setLinks([]);
-
-    // Host-supplied links are already in page units with a top-left origin,
-    // which is the same frame the annotations are converted into below; only
-    // the render scale separates them from CSS pixels.
-    if (hostLinks) {
-      setLinks(
-        hostLinks
-          .filter((link) => link.page != null || link.url)
-          .map((link, index) => ({
-            key: `host-${index}`,
-            left: link.bbox.x * scale,
-            top: link.bbox.y * scale,
-            width: link.bbox.width * scale,
-            height: link.bbox.height * scale,
-            dest:
-              link.page != null
-                ? { page: link.page, offsetY: link.offsetY ?? null }
-                : null,
-            url: link.url ?? null,
-          })),
-      );
-      return;
-    }
-
-    pdf
-      .getPage(pageNumber)
-      .then(async (page) => {
-        const annotations = await page.getAnnotations();
-        if (cancelled) return;
-        const viewport = page.getViewport({ scale });
-
-        const rects: LinkRect[] = [];
-        for (const [index, annotation] of annotations.entries()) {
-          if (annotation.subtype !== "Link") continue;
-          const dest = (annotation.dest ?? null) as PdfDestination | null;
-          const url = (annotation.url ?? null) as string | null;
-          // Only annotations that actually navigate somewhere are clickable.
-          if (!dest && !url) continue;
-
-          // Map the PDF-space rect (bottom-left origin) to top-left CSS pixels
-          // at the render scale. pdf.js 6 dropped `convertToViewportRectangle`;
-          // it was exactly this -- the same affine transform applied to the two
-          // corners. They may come back unordered, so normalise below.
-          const [x1, y1] = viewport.convertToViewportPoint(
-            annotation.rect[0],
-            annotation.rect[1],
-          );
-          const [x2, y2] = viewport.convertToViewportPoint(
-            annotation.rect[2],
-            annotation.rect[3],
-          );
-          rects.push({
-            key: `${index}`,
-            left: Math.min(x1, x2),
-            top: Math.min(y1, y2),
-            width: Math.abs(x2 - x1),
-            height: Math.abs(y2 - y1),
-            dest,
-            url,
-          });
-        }
-
+    loadPageLinks(pdf, pageNumber, scale, hostLinks).then(
+      (rects) => {
         if (!cancelled) setLinks(rects);
-      })
-      .catch((e) => {
+      },
+      (e) => {
         if (!cancelled) console.error(`PDF link layer (page ${pageNumber}) failed:`, e);
-      });
-
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -281,4 +221,60 @@ export default function PdfLinkLayer({
       ))}
     </>
   );
+}
+
+/** A page's links: where each is, at `scale` px per page unit from the page's
+ *  top-left, and where it goes. From the host when it holds them, otherwise
+ *  from the page's Link annotations. */
+export async function loadPageLinks(
+  pdf: PDFDocumentProxy,
+  pageNumber: number,
+  scale: number,
+  hostLinks?: HostLink[],
+): Promise<LinkRect[]> {
+  // Host-supplied links are already in page units with a top-left origin,
+  // which is the same frame the annotations are converted into below; only
+  // the render scale separates them from CSS pixels.
+  if (hostLinks) {
+    return hostLinks
+      .filter((link) => link.page != null || link.url)
+      .map((link, index) => ({
+        key: `host-${index}`,
+        left: link.bbox.x * scale,
+        top: link.bbox.y * scale,
+        width: link.bbox.width * scale,
+        height: link.bbox.height * scale,
+        dest: link.page != null ? { page: link.page, offsetY: link.offsetY ?? null } : null,
+        url: link.url ?? null,
+      }));
+  }
+
+  const page = await pdf.getPage(pageNumber);
+  const annotations = await page.getAnnotations();
+  const viewport = page.getViewport({ scale });
+  const rects: LinkRect[] = [];
+  for (const [index, annotation] of annotations.entries()) {
+    if (annotation.subtype !== "Link") continue;
+    const dest = (annotation.dest ?? null) as PdfDestination | null;
+    const url = (annotation.url ?? null) as string | null;
+    // Only annotations that actually navigate somewhere are clickable.
+    if (!dest && !url) continue;
+
+    // Map the PDF-space rect (bottom-left origin) to top-left CSS pixels
+    // at the render scale. pdf.js 6 dropped `convertToViewportRectangle`;
+    // it was exactly this -- the same affine transform applied to the two
+    // corners. They may come back unordered, so normalise below.
+    const [x1, y1] = viewport.convertToViewportPoint(annotation.rect[0], annotation.rect[1]);
+    const [x2, y2] = viewport.convertToViewportPoint(annotation.rect[2], annotation.rect[3]);
+    rects.push({
+      key: `${index}`,
+      left: Math.min(x1, x2),
+      top: Math.min(y1, y2),
+      width: Math.abs(x2 - x1),
+      height: Math.abs(y2 - y1),
+      dest,
+      url,
+    });
+  }
+  return rects;
 }

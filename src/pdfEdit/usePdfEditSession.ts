@@ -29,6 +29,7 @@ import {
 } from "./paragraphs.js";
 import { analysePage, PageRasters, type FontInfo, type PageAnalysis } from "./pdfPageSource.js";
 import { layoutPage, reflowDocument } from "./reflow.js";
+import { relocateArea, relocateHeight, type PageArea } from "./relocation.js";
 import { fontRequestOf } from "./typeChange.js";
 
 /**
@@ -116,6 +117,12 @@ export interface PdfEditSession {
     input?: PendingInput | null,
   ) => ParagraphEdit | null;
   locate: (itemId: string) => Located | null;
+  /** Where an area of a page as the file has it is drawn now: nowhere, where
+   *  the text it lay on was replaced; in pieces, where the lines it lay on
+   *  have been parted. */
+  relocate: (page: number, rect: BoundingBox) => PageArea[];
+  /** The page and height that a height on a page of the file is at now. */
+  relocateHeight: (page: number, y: number) => { page: number; y: number };
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
   /** What is known of a font used on a page, by the name pdf.js loaded it as. */
   fontOf: (page: number, fontName: string) => FontInfo;
@@ -697,6 +704,8 @@ export function usePdfEditSession(
         backdrops: backdrops.get(page) ?? NO_BACKDROPS,
       }),
 
+      relocate: (page, rect) => relocateArea(page, rect, model.flowOf(page), locate),
+      relocateHeight: (page, y) => relocateHeight(page, y, model.flowOf(page), locate),
       slotsOf,
       splitParagraph,
       neighbourOf,

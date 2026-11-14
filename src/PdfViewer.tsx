@@ -23,7 +23,7 @@ import ZoomControls, { PAGE_MAX_ZOOM, PAGE_MIN_ZOOM, PageIndicator, ViewerToolba
 import { pageStepKeyDown, steppedPage, useZoomShortcuts } from "./readerShortcuts.js";
 import { getScaledPageHeight, usePdfPageMetrics } from "./usePdfPageMetrics.js";
 import PdfTextLayer from "./PdfTextLayer.js";
-import PdfLinkLayer, { type PageLinks } from "./PdfLinkLayer.js";
+import PdfLinkLayer, { loadPageLinks, type PageLinks } from "./PdfLinkLayer.js";
 import PdfOutline from "./PdfOutline.js";
 import { usePdfOutline, type PdfOutlineNode } from "./usePdfOutline.js";
 import { resolveDestination, type PdfDestination } from "./pdfDestinations.js";
@@ -95,11 +95,15 @@ export interface PdfViewerProps {
   links?: PageLinks[] | null;
   /** Edit the document's text in place.
    *
-   *  A paragraph the reader clicks becomes live text, and what follows it moves
-   *  to make room -- down the page, and on to the next when a page fills. This
-   *  changes how the pages are *drawn* and nothing else: the file is not
-   *  written, and the text layer, links, decorations and find belong to the
-   *  pages as the file has them, so they are not shown while editing. */
+   *  Every paragraph can be typed in, and what follows it moves to make room
+   *  -- down the page, and on to the next when a page fills. This changes how
+   *  the pages are *drawn* and nothing else: the file is not written. What is
+   *  marked on the pages -- decorations, the find match, the passage the
+   *  reader was sent to -- is drawn where the lines it marks are now; links
+   *  are followed with Cmd or Ctrl held, since a click is for the caret. Find
+   *  searches the file's text, not what has been typed since; the gutter and
+   *  the selection actions belong to the pages as the file has them and are
+   *  not offered. */
   editing?: boolean;
   slots?: PdfReaderSlots;
   /** Imperative control — navigation, zoom and find as commands. */
@@ -115,6 +119,13 @@ export interface PdfViewerProps {
 }
 
 export type PdfSelection = DocumentSelection;
+
+/** Something marked on a page while editing, where it is drawn now. */
+interface EditMark {
+  key: string;
+  className: string;
+  rect: BoundingBox;
+}
 
 export interface PdfReaderHandle extends FindableReaderHandle, ZoomableReaderHandle {
   /** Scroll a page to the top of the viewport, optionally revealing a
@@ -417,6 +428,10 @@ export default function PdfViewer({
   // Keyed on the count rather than the session: the session is a new object
   // whenever anything in it changes, and a new list of pages on each of those
   // would have the virtualizer re-measure for every keystroke.
+  // For what must read the session when something happens rather than follow
+  // it as it changes: navigation, and revealing a match.
+  const editSessionRef = useRef(editSession);
+  editSessionRef.current = editSession;
   const editPageCount = editSession?.pageCount ?? 0;
   const layoutMetrics = useMemo(() => {
     const last = pageMetrics[pageMetrics.length - 1];
@@ -693,11 +708,17 @@ export default function PdfViewer({
       resolveDestination(pdf, dest)
         .then((resolved) => {
           if (!resolved) return;
-          const { pageIndex, offsetY } = resolved;
+          // While editing, what the destination pointed at may have moved.
+          const moved =
+            resolved.offsetY !== null && editSessionRef.current
+              ? editSessionRef.current.relocateHeight(resolved.pageIndex + 1, resolved.offsetY)
+              : null;
+          const pageIndex = moved ? moved.page - 1 : resolved.pageIndex;
+          const offsetY = moved ? moved.y : resolved.offsetY;
           virtualizer.scrollToIndex(pageIndex, { align: "start" });
           setCurrentPage(pageIndex + 1);
           if (offsetY !== null) {
-            const metric = pageMetrics[pageIndex];
+            const metric = layoutMetrics[pageIndex];
             const container = containerRef.current;
             if (metric && container) {
               const pageScale = renderedWidth / metric.width;
@@ -711,7 +732,7 @@ export default function PdfViewer({
         })
         .catch((e) => console.error("PDF link navigation failed:", e));
     },
-    [pdf, virtualizer, pageMetrics, renderedWidth],
+    [pdf, virtualizer, layoutMetrics, renderedWidth],
   );
 
   const openExternalLink = openExternal;
@@ -822,13 +843,19 @@ export default function PdfViewer({
   // geometry on the next frame to reveal the match itself. Page-only alignment
   // leaves matches lower down a page outside the viewport.
   useEffect(() => {
-    const active = innerMatches[currentMatchIdx];
+    const found = innerMatches[currentMatchIdx];
+    if (!found) return;
+    // While editing, a match is where the line it was found on is now. One in
+    // text that has since been replaced is nowhere, and is passed over.
+    const session = editSessionRef.current;
+    const [moved] = session ? session.relocate(found.page, found.bbox) : [];
+    const active = session ? (moved ? { page: moved.page, bbox: moved.rect } : null) : found;
     if (!active) return;
 
     scrollToPage(active.page);
     const frame = requestAnimationFrame(() => {
       const container = containerRef.current;
-      const pageMetric = pageMetrics[active.page - 1];
+      const pageMetric = layoutMetrics[active.page - 1];
       const pageElement = container?.querySelector<HTMLElement>(
         `[data-page-number="${active.page}"]`,
       );
@@ -840,7 +867,83 @@ export default function PdfViewer({
     // Stepping quickly can replace the active match before the virtualized page
     // is committed. Do not let the older deferred reveal win that race.
     return () => cancelAnimationFrame(frame);
-  }, [currentMatchIdx, innerMatches, scrollToPage, pageMetrics, renderedWidth]);
+  }, [currentMatchIdx, innerMatches, scrollToPage, layoutMetrics, renderedWidth]);
+
+  // What is marked on the pages while editing -- the host's decorations, the
+  // match find is on, the passage the reader was sent to -- each drawn where
+  // the lines it marks are now, which can be another page than it names.
+  const editMarks = useMemo(() => {
+    if (!editSession) return null;
+    const marks = new Map<number, EditMark[]>();
+    const mark = (key: string, className: string, page: number, rect: BoundingBox) => {
+      editSession.relocate(page, rect).forEach((area, piece) => {
+        const onPage = marks.get(area.page) ?? [];
+        onPage.push({ key: `${key}:${piece}`, className, rect: area.rect });
+        marks.set(area.page, onPage);
+      });
+    };
+    for (const decoration of decorations) {
+      const { anchor } = decoration;
+      if (anchor.kind !== "rects") continue;
+      const className = ["pdf-highlight", decoration.className].filter(Boolean).join(" ");
+      anchor.rects.forEach((rect, index) => mark(`${decoration.id}:${index}`, className, anchor.page, rect));
+    }
+    const match = isSearchOpen ? innerMatches[currentMatchIdx] : undefined;
+    if (match) mark("find", "pdf-highlight", match.page, match.bbox);
+    if (!isSearchOpen && drawnTarget) {
+      const rects = drawnTarget.rects.length > 0 ? drawnTarget.rects : [drawnTarget.bbox];
+      rects.forEach((rect, index) => mark(`target:${index}`, "pdf-highlight", drawnTarget.page, rect));
+    }
+    return marks;
+  }, [editSession, decorations, isSearchOpen, innerMatches, currentMatchIdx, drawnTarget]);
+
+  // While editing a click is for the caret, so a link is followed with Cmd or
+  // Ctrl held, as in any editor. The link may have moved with its line, and
+  // onto the next page or back onto the one before.
+  const followLinkAt = useCallback(
+    async (clientX: number, clientY: number) => {
+      const session = editSessionRef.current;
+      const container = containerRef.current;
+      if (!pdf || !session || !container) return;
+      for (const element of container.querySelectorAll<HTMLElement>("[data-page-number]")) {
+        const sheet = element.querySelector<HTMLElement>(".pdf-edit-page");
+        const box = sheet?.getBoundingClientRect();
+        if (!box || clientX < box.left || clientX > box.right || clientY < box.top || clientY > box.bottom) {
+          continue;
+        }
+        const pageNumber = Number(element.dataset.pageNumber);
+        const metric = layoutMetrics[pageNumber - 1];
+        if (!metric) return;
+        const scale = box.width / metric.width;
+        const x = (clientX - box.left) / scale;
+        const y = (clientY - box.top) / scale;
+        for (const source of [pageNumber - 1, pageNumber, pageNumber + 1]) {
+          if (source < 1 || source > pdf.numPages) continue;
+          const hostLinks = suppliedLinks
+            ? (suppliedLinks.find((entry) => entry.page === source)?.links ?? [])
+            : undefined;
+          for (const link of await loadPageLinks(pdf, source, 1, hostLinks)) {
+            const hit = session
+              .relocate(source, { x: link.left, y: link.top, width: link.width, height: link.height })
+              .some(
+                (area) =>
+                  area.page === pageNumber &&
+                  x >= area.rect.x &&
+                  x <= area.rect.x + area.rect.width &&
+                  y >= area.rect.y &&
+                  y <= area.rect.y + area.rect.height,
+              );
+            if (!hit) continue;
+            if (link.url) openExternal(link.url);
+            else if (link.dest) navigateToDestination(link.dest);
+            return;
+          }
+        }
+        return;
+      }
+    },
+    [pdf, layoutMetrics, suppliedLinks, openExternal, navigateToDestination],
+  );
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -1137,6 +1240,12 @@ export default function PdfViewer({
           tabIndex={0}
           className={`flex-1 min-w-0 overflow-auto bg-[var(--bg-sidebar)] pr-1 outline-none ${isDark ? "pdf-dark-mode" : ""}`}
           onMouseUp={domSelection.readSelection}
+          onClick={(event) => {
+            if (!editSession || !(event.metaKey || event.ctrlKey)) return;
+            followLinkAt(event.clientX, event.clientY).catch((error) =>
+              console.error("PDF edit: following a link failed:", error),
+            );
+          }}
           onScroll={() => {
             requestAnimationFrame(() => {
               syncCurrentPageFromScroll();
@@ -1171,16 +1280,26 @@ export default function PdfViewer({
                     data-page-number={pageNum}
                     style={{ width: "100%", height: pageHeight + PAGE_GAP_PX }}
                   >
-                    <PdfEditPage
-                      session={editSession}
-                      pageNumber={pageNum}
-                      width={renderedWidth}
-                      size={pageMetric}
-                      onRenderSuccess={() => {
-                        const landing = landingPageRef.current ?? (page || 1);
-                        if (pageNum === landing) signalInitialRender();
-                      }}
-                    />
+                    <div style={{ position: "relative", display: "inline-block", height: pageHeight }}>
+                      <PdfEditPage
+                        session={editSession}
+                        pageNumber={pageNum}
+                        width={renderedWidth}
+                        size={pageMetric}
+                        onRenderSuccess={() => {
+                          const landing = landingPageRef.current ?? (page || 1);
+                          if (pageNum === landing) signalInitialRender();
+                        }}
+                      />
+                      {editMarks?.get(pageNum)?.map((mark) => (
+                        <div
+                          key={mark.key}
+                          data-testid="edit-mark"
+                          className={mark.className}
+                          style={highlightRectStyle(mark.rect, pageScale)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 );
               }
