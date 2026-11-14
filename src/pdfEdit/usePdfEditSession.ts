@@ -9,6 +9,7 @@ import {
   createEdit,
   editBackdrops,
   editFragments,
+  pagesOf,
   replacesItems,
   type Backdrop,
   type EditFragment,
@@ -18,9 +19,10 @@ import type { FlowItem, PageFlow, Placement } from "./flow.js";
 import { useLiveFonts, type LiveFont, type ResolvePdfFont } from "./hostFonts.js";
 import {
   adoptRuns,
-  mergeParagraphs,
   paragraphAfter,
   paragraphsOf,
+  runningOnInto,
+  runsToEdge,
   type Paragraph,
   type StyledRun,
 } from "./paragraphs.js";
@@ -95,9 +97,22 @@ export interface PdfEditSession {
   slotsOf: (page: number) => Slot[];
   /** Cut a paragraph in two where the reader pressed Enter. */
   splitParagraph: (slot: Slot, before: StyledRun[], after: StyledRun[]) => void;
-  /** Join a paragraph to the one before it (-1) or after it (1), given what it
-   *  says now. False when there is nothing there it can be joined to. */
-  joinParagraphs: (slot: Slot, direction: -1 | 1, runs: StyledRun[]) => boolean;
+  /** The paragraph before (-1) or after (1) another in reading order, across
+   *  columns and pages. Null at either end of the document, and where the next
+   *  page has not been read yet -- which this then asks for. */
+  neighbourOf: (slot: Slot, direction: -1 | 1) => Slot | null;
+  /** Make one paragraph of `first`, `last` and every paragraph between them.
+   *  It says `firstRuns` and then `lastRuns` -- what is to be left of the two
+   *  ends -- and stands where `first` stood; the rest give up their places.
+   *  `input` is a keystroke still to happen where the two meet. False when
+   *  what lies between them has not all been read. */
+  joinParagraphs: (
+    first: Slot,
+    last: Slot,
+    firstRuns: StyledRun[],
+    lastRuns: StyledRun[],
+    input?: PendingInput | null,
+  ) => boolean;
   locate: (itemId: string) => Located | null;
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
   /** What is known of a font used on a page, by the name pdf.js loaded it as. */
@@ -122,6 +137,28 @@ export interface PdfEditSession {
   removeEdit: (id: string) => void;
   handoff: Handoff | null;
   clearHandoff: () => void;
+}
+
+/** What a slot says now, as far as the session has been told. */
+export const runsOfSlot = (slot: Slot) => slot.edit?.runs ?? slot.paragraph.runs;
+
+/** Join a paragraph, given what it says now, to the one before it (-1) or
+ *  after it (1): what deleting the break at its edge means. */
+export function joinNeighbour(
+  session: PdfEditSession,
+  slot: Slot,
+  direction: -1 | 1,
+  runs: StyledRun[],
+): boolean {
+  const other = session.neighbourOf(slot, direction);
+  if (!other) return false;
+  const [first, last] = direction < 0 ? [other, slot] : [slot, other];
+  const lastRuns = last === slot ? runs : runsOfSlot(last);
+  let firstRuns = first === slot ? runs : runsOfSlot(first);
+  // A paragraph the page broke across a column or a page is in two pieces
+  // that were never two paragraphs: the join is in the middle of a sentence.
+  if (!first.edit && runsToEdge(first.paragraph)) firstRuns = runningOnInto(firstRuns, lastRuns);
+  return session.joinParagraphs(first, last, firstRuns, lastRuns);
 }
 
 const DEFAULT_FONT: FontInfo = { name: "", generic: "serif", bold: false, italic: false };
@@ -177,9 +214,10 @@ export function usePdfEditSession(
     const kept = usableEdits(draft);
     const ids = kept.map(() => `edit-${nextEditId.current++}`);
     setEdits(
-      kept.map(({ paragraph, runs, after, structural }, index) => ({
+      kept.map(({ paragraph, runs, after, structural, absorbed }, index) => ({
         ...createEdit(ids[index], paragraph),
         runs,
+        absorbed,
         after: after === undefined ? null : (ids[after] ?? null),
         structural: structural ?? false,
       })),
@@ -196,10 +234,11 @@ export function usePdfEditSession(
       edits.length > 0
         ? {
             version: 1,
-            edits: edits.map(({ paragraph, runs, after, structural }) => ({
+            edits: edits.map(({ paragraph, runs, after, structural, absorbed }) => ({
               paragraph,
               runs,
               structural,
+              absorbed,
               // By position: ids are made afresh each time a draft is taken up.
               ...(after === null ? {} : { after: edits.findIndex((edit) => edit.id === after) }),
             })),
@@ -327,7 +366,7 @@ export function usePdfEditSession(
           const flow = model.flowOf(page);
           return flow && applyEdits(flow, edits);
         },
-        edits.map((edit) => edit.paragraph.page),
+        edits.flatMap(pagesOf),
         documentPages,
         horizon,
       ),
@@ -362,6 +401,11 @@ export function usePdfEditSession(
     const unanchored = (edit: ParagraphEdit) =>
       edit.after !== null && !edits.some((other) => other.id === edit.after);
     const stale = edits.filter((edit) => {
+      // What it absorbed must still be there to be left out.
+      const adrift = edit.absorbed.some(
+        (items) => analyses.has(items.page) && !model.hasItems(items.page, items.itemIds),
+      );
+      if (adrift) return true;
       // One that follows another edit goes when that edit has gone.
       if (!replacesItems(edit)) return unanchored(edit);
       if (!analyses.has(edit.paragraph.page)) return false;
@@ -444,7 +488,12 @@ export function usePdfEditSession(
     );
     // Strips an edit stands in for. A paragraph joined into the one above it
     // is still a paragraph of its page, but there is nothing of it left to show.
-    const replaced = new Set(edits.flatMap((edit) => edit.paragraph.itemIds));
+    const replaced = new Set(
+      edits.flatMap((edit) => [
+        ...edit.paragraph.itemIds,
+        ...edit.absorbed.flatMap((items) => items.itemIds),
+      ]),
+    );
     const followersOf = (id: string) => edits.filter((edit) => edit.after === id);
 
     const slotsOf = (page: number): Slot[] => {
@@ -503,54 +552,73 @@ export function usePdfEditSession(
       setHandoff({ editId: second.id, anchor: 0, focus: 0, input: null });
     };
 
-    const joinParagraphs: PdfEditSession["joinParagraphs"] = (slot, direction, runs) => {
-      const slots = slotsOf(slot.paragraph.page);
-      const index = slots.findIndex((candidate) => sameSlot(candidate, slot));
-      const other = slots[index + direction];
-      if (index < 0 || !other) return false;
-      const [first, second] = direction < 0 ? [other, slot] : [slot, other];
-      const runsOf = (side: Slot) => (side === slot ? runs : (side.edit?.runs ?? side.paragraph.runs));
-      const backed = (side: Slot) => side.paragraph.itemIds.length > 0;
-
-      let paragraph: Paragraph;
-      let joined: StyledRun[];
-      if (backed(first) && backed(second)) {
-        // Only what the page set one directly under the other can become one
-        // paragraph: across a column, a page or a figure there is something
-        // between them that a paragraph cannot contain.
-        const lastOfFirst = first.paragraph.itemIds[first.paragraph.itemIds.length - 1];
-        if (!model.followsOn(slot.paragraph.page, lastOfFirst, second.paragraph.itemIds[0])) return false;
-        paragraph = mergeParagraphs(first.paragraph, second.paragraph);
-        joined = [...runsOf(first), ...adoptRuns(paragraph.styles, second.paragraph.styles, runsOf(second))];
-      } else if (backed(second)) {
-        // A paragraph the reader made, joined to the page's paragraph after
-        // it: the result stands where the page's paragraph stood.
-        paragraph = { ...second.paragraph, styles: [...second.paragraph.styles] };
-        joined = [...adoptRuns(paragraph.styles, first.paragraph.styles, runsOf(first)), ...runsOf(second)];
-      } else {
-        paragraph = { ...first.paragraph, styles: [...first.paragraph.styles] };
-        joined = [...runsOf(first), ...adoptRuns(paragraph.styles, second.paragraph.styles, runsOf(second))];
+    /** The slots of the pages from one slot's to another's, in reading order.
+     *  Null when a page among them has not been read. */
+    const slotsAcross = (from: number, to: number): Slot[] | null => {
+      const slots: Slot[] = [];
+      for (let page = from; page <= to; page++) {
+        if (page <= documentPages && !analyses.has(page)) {
+          requestAnalysis(page);
+          return null;
+        }
+        slots.push(...slotsOf(page));
       }
+      return slots;
+    };
 
+    const neighbourOf: PdfEditSession["neighbourOf"] = (slot, direction) => {
+      // A page can hold no paragraph at all -- a plate, a blank -- so the
+      // neighbour is on the nearest page that has one.
+      for (let page = slot.paragraph.page; page >= 1 && page <= documentPages; page += direction) {
+        const [from, to] = direction < 0 ? [page, slot.paragraph.page] : [slot.paragraph.page, page];
+        const slots = slotsAcross(from, to);
+        if (!slots) return null;
+        const other = slots[slots.findIndex((candidate) => sameSlot(candidate, slot)) + direction];
+        if (other) return other;
+      }
+      return null;
+    };
+
+    const joinParagraphs: PdfEditSession["joinParagraphs"] = (first, last, firstRuns, lastRuns, input = null) => {
+      const slots = slotsAcross(first.paragraph.page, last.paragraph.page);
+      if (!slots) return false;
+      const start = slots.findIndex((candidate) => sameSlot(candidate, first));
+      const end = slots.findIndex((candidate) => sameSlot(candidate, last));
+      if (start < 0 || end <= start) return false;
+      const taken = slots.slice(start + 1, end + 1);
+
+      // The result stands where the first stood and is set as it was set.
+      // Everything after it gives up its place on the page: a paragraph of the
+      // page by having its strips left out, one the reader made by going.
+      const paragraph: Paragraph = { ...first.paragraph, styles: [...first.paragraph.styles] };
       const result: ParagraphEdit = {
         ...createEdit(newId(), paragraph),
-        // Only two paragraphs that both replaced nothing leave one that does.
-        after: backed(first) || backed(second) ? null : (first.edit?.after ?? null),
-        runs: joined,
+        after: first.edit?.after ?? null,
+        absorbed: [
+          ...(first.edit?.absorbed ?? []),
+          ...taken.flatMap((slot) => [
+            ...(slot.paragraph.itemIds.length > 0
+              ? [{ page: slot.paragraph.page, itemIds: slot.paragraph.itemIds }]
+              : []),
+            ...(slot.edit?.absorbed ?? []),
+          ]),
+        ],
+        runs: [...firstRuns, ...adoptRuns(paragraph.styles, last.paragraph.styles, lastRuns)],
         structural: true,
         lineCount:
           (first.edit?.lineCount ?? first.paragraph.lineCount) +
-          (second.edit?.lineCount ?? second.paragraph.lineCount),
+          (last.edit?.lineCount ?? last.paragraph.lineCount),
       };
-      const absorbed = new Set([first.edit?.id, second.edit?.id]);
+      const gone = new Set([first, ...taken].flatMap((slot) => (slot.edit ? [slot.edit.id] : [])));
       setEdits((current) => [
         ...current
-          .filter((edit) => !absorbed.has(edit.id))
-          .map((edit) => (edit.after !== null && absorbed.has(edit.after) ? { ...edit, after: result.id } : edit)),
+          .filter((edit) => !gone.has(edit.id))
+          // What followed the last of them follows the one they have become.
+          .map((edit) => (edit.after !== null && gone.has(edit.after) ? { ...edit, after: result.id } : edit)),
         result,
       ]);
-      const seam = textLength(runsOf(first));
-      setHandoff({ editId: result.id, anchor: seam, focus: seam, input: null });
+      const seam = textLength(firstRuns);
+      setHandoff({ editId: result.id, anchor: seam, focus: seam, input });
       return true;
     };
     // One list for every page: a page's view is asked for on each of its
@@ -593,6 +661,7 @@ export function usePdfEditSession(
 
       slotsOf,
       splitParagraph,
+      neighbourOf,
       joinParagraphs,
       locate,
 

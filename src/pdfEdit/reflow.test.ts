@@ -323,6 +323,26 @@ describe("reflowDocument", () => {
     expect(tops["1:a:4"]).toBe(100 + 6 * 12);
   });
 
+  it("leaves out the strips of a paragraph joined into another, wherever it was", () => {
+    const first = page(1, [column(1, "a", 50, 20, 100)]);
+    const second = page(2, [column(2, "a", 50, 10, 100)]);
+    // Two lines on the first page that now also say what three lines of it
+    // further down said, and the first two of the next page.
+    const edit = {
+      ...edited(first, 0, 2, 5),
+      absorbed: [
+        { page: 1, itemIds: ["1:a:10", "1:a:11", "1:a:12"] },
+        { page: 2, itemIds: ["2:a:0", "2:a:1"] },
+      ],
+    };
+    const reflow = reflowDocument((n) => applyEdits(flows([first, second])(n), [edit]), [1, 2], 2);
+    const onFirst = reflow.plans.get(1)!.placements.map((p) => p.item.id);
+    expect(onFirst).not.toContain("1:a:11");
+    // Five lines in place of five: the page ends where it did.
+    expect(onFirst[onFirst.length - 1]).toBe("1:a:19");
+    expect(reflow.plans.get(2)!.placements[0]).toMatchObject({ item: { id: "2:a:2" }, y: 100 });
+  });
+
   it("chains paragraphs made one after another, in order", () => {
     const first = page(1, [column(1, "a", 50, 6, 100)]);
     const kept = edited(first, 0, 1, 1);

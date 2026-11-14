@@ -5,7 +5,7 @@ import { estimatedAscent, splitRuns } from "./edits.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
 import type { Paragraph } from "./paragraphs.js";
 import { lineHeightPx, pageFace, paragraphTextStyle } from "./paragraphStyle.js";
-import type { PdfEditSession, PendingInput } from "./usePdfEditSession.js";
+import { joinNeighbour, type PdfEditSession, type PendingInput } from "./usePdfEditSession.js";
 
 /**
  * A paragraph nobody has changed: the page's own rendering, with a caret.
@@ -61,9 +61,9 @@ export default function PageParagraph({ session, paragraph, geometryOf }: PagePa
       // goes, but the break between it and its neighbour does.
       if (input.kind === "delete" && start === end) {
         if (event.inputType.endsWith("Backward") && start === 0) {
-          sessionRef.current.joinParagraphs(slot, -1, paragraph.runs);
+          joinNeighbour(sessionRef.current, slot, -1, paragraph.runs);
         } else if (event.inputType.endsWith("Forward") && start >= paragraph.text.length) {
-          sessionRef.current.joinParagraphs(slot, 1, paragraph.runs);
+          joinNeighbour(sessionRef.current, slot, 1, paragraph.runs);
         }
         return;
       }

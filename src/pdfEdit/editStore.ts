@@ -1,3 +1,4 @@
+import type { AbsorbedItems } from "./edits.js";
 import type { Paragraph, StyledRun } from "./paragraphs.js";
 
 /**
@@ -24,6 +25,8 @@ export interface DraftEdit {
   after?: number;
   /** Part of a change to the document's paragraphs: one split, two joined. */
   structural?: boolean;
+  /** The strips of paragraphs joined into this one. */
+  absorbed: AbsorbedItems[];
 }
 
 export interface PdfEditStore {
@@ -57,6 +60,7 @@ function isUsable(edit: DraftEdit): boolean {
   const box = paragraph?.area;
   return (
     Array.isArray(edit?.runs) &&
+    Array.isArray(edit?.absorbed) &&
     paragraph !== undefined &&
     Number.isInteger(paragraph.page) &&
     Array.isArray(paragraph.itemIds) &&

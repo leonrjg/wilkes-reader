@@ -23,7 +23,7 @@ const paragraph = {
   align: "left" as const,
   lines: [],
 };
-const edit: DraftEdit = { paragraph, runs: [{ text: "Other words.", style: 0 }] };
+const edit: DraftEdit = { paragraph, runs: [{ text: "Other words.", style: 0 }], absorbed: [] };
 
 describe("usableEdits", () => {
   it("takes up a draft this version wrote", () => {
@@ -43,13 +43,13 @@ describe("usableEdits", () => {
 
 describe("usableEdits for paragraphs the reader made", () => {
   it("takes up one that names the edit it follows", () => {
-    const made: DraftEdit = { paragraph: { ...paragraph, itemIds: [] }, runs: [], after: 0, structural: true };
+    const made: DraftEdit = { paragraph: { ...paragraph, itemIds: [] }, runs: [], after: 0, structural: true, absorbed: [] };
     expect(usableEdits({ version: 1, edits: [edit, made] })).toEqual([edit, made]);
   });
 
   it("lets go of one with nothing on the page and nothing to follow", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const adrift: DraftEdit = { paragraph: { ...paragraph, itemIds: [] }, runs: [] };
+    const adrift: DraftEdit = { paragraph: { ...paragraph, itemIds: [] }, runs: [], absorbed: [] };
     expect(usableEdits({ version: 1, edits: [adrift] })).toEqual([]);
     warn.mockRestore();
   });

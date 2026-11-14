@@ -21,6 +21,11 @@ export interface ParagraphEdit {
   paragraph: Paragraph;
   /** The edit this one comes directly after, when it replaces nothing. */
   after: string | null;
+  /** Strips of the document this edit stands in for besides its paragraph's
+   *  own: the paragraphs joined into it, wherever they were -- further down
+   *  its column, in the next one, on another page. They are dropped where they
+   *  stood, and what they said is part of what this says. */
+  absorbed: AbsorbedItems[];
   /** What the paragraph says now, in the styles of `paragraph.styles`. */
   runs: StyledRun[];
   /** Raised when `runs` is changed from outside the live text -- a paragraph
@@ -38,11 +43,18 @@ export interface ParagraphEdit {
   ascent: number | null;
 }
 
+/** Items of one page that an edit took the place of from elsewhere. */
+export interface AbsorbedItems {
+  page: number;
+  itemIds: string[];
+}
+
 export function createEdit(id: string, paragraph: Paragraph): ParagraphEdit {
   return {
     id,
     paragraph,
     after: null,
+    absorbed: [],
     runs: paragraph.runs,
     revision: 0,
     structural: false,
@@ -85,10 +97,22 @@ function ascentOf(edit: ParagraphEdit): number {
   return edit.ascent ?? estimatedAscent(edit.paragraph);
 }
 
-/** The page's flow with each edited paragraph's strips replaced by its lines. */
+/** The pages an edit changes: its paragraph's, and those of what it absorbed. */
+export const pagesOf = (edit: ParagraphEdit) => [
+  edit.paragraph.page,
+  ...edit.absorbed.map((items) => items.page),
+];
+
+/** The page's flow with each edited paragraph's strips replaced by its lines,
+ *  and without the strips of paragraphs that were joined into another. */
 export function applyEdits(flow: PageFlow, edits: readonly ParagraphEdit[]): PageFlow {
   const own = edits.filter((edit) => edit.paragraph.page === flow.page);
-  if (own.length === 0) return flow;
+  const gone = new Set(
+    edits.flatMap((edit) =>
+      edit.absorbed.filter((items) => items.page === flow.page).flatMap((items) => items.itemIds),
+    ),
+  );
+  if (own.length === 0 && gone.size === 0) return flow;
   const replacing = own.filter(replacesItems);
   const following = own.filter((edit) => !replacesItems(edit));
   return {
@@ -96,10 +120,15 @@ export function applyEdits(flow: PageFlow, edits: readonly ParagraphEdit[]): Pag
     regions: flow.regions.map((region) => ({
       ...region,
       columns: region.columns.map((column) =>
-        insertFollowing(replacing.reduce(replaceParagraph, column), following),
+        insertFollowing(replacing.reduce(replaceParagraph, without(column, gone)), following),
       ),
     })),
   };
+}
+
+function without(column: FlowColumn, gone: ReadonlySet<string>): FlowColumn {
+  if (gone.size === 0 || !column.items.some((item) => gone.has(item.id))) return column;
+  return { ...column, items: column.items.filter((item) => !gone.has(item.id)) };
 }
 
 /** Put the paragraphs the reader made after the edits they follow. One can

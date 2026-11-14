@@ -195,7 +195,48 @@ function columnParagraphs(
     group.push(entry);
   }
   close();
-  return paragraphs;
+  return alignedWithColumn(paragraphs);
+}
+
+/** A paragraph of one or two lines does not say how it is aligned: there are
+ *  not two full lines to compare. Where the column's longer paragraphs in the
+ *  same size are justified, it is taken to be too. */
+function alignedWithColumn(paragraphs: Paragraph[]): Paragraph[] {
+  const telling = paragraphs.filter((paragraph) => paragraph.lineCount >= 3);
+  return paragraphs.map((paragraph) => {
+    if (paragraph.lineCount >= 3 || paragraph.align === "justify") return paragraph;
+    const alike = telling.filter(
+      (other) => Math.abs(other.fontSize - paragraph.fontSize) <= FONT_SIZE_TOLERANCE * other.fontSize,
+    );
+    const justified = alike.filter((other) => other.align === "justify").length * 2 > alike.length;
+    const right = paragraph.inset + paragraph.width;
+    const full = paragraph.lines
+      .slice(0, -1)
+      .every((line) => right - (line.inset + line.width) < 0.5 * paragraph.fontSize);
+    return justified && full ? { ...paragraph, align: "justify" } : paragraph;
+  });
+}
+
+/** Whether a paragraph's last line runs to the edge of its column. It did not
+ *  end there, then: what follows it in the next column or on the next page is
+ *  the rest of the same paragraph. */
+export function runsToEdge(paragraph: Paragraph): boolean {
+  const last = paragraph.lines[paragraph.lines.length - 1];
+  if (!last) return false;
+  const short = paragraph.inset + paragraph.width - (last.inset + last.width);
+  return short <= SHORT_LINE_EMS * paragraph.fontSize;
+}
+
+/** Runs ready to have `next` run straight on from them as part of the same
+ *  sentence: with a space between, or without the hyphen a typesetter put at
+ *  the break. */
+export function runningOnInto(runs: readonly StyledRun[], next: readonly StyledRun[]): StyledRun[] {
+  const last = runs[runs.length - 1];
+  const following = next[0]?.text ?? "";
+  if (!last || /\s$/.test(last.text) || following === "") return [...runs];
+  const text =
+    /\p{L}-$/u.test(last.text) && /^\p{Ll}/u.test(following) ? last.text.slice(0, -1) : `${last.text} `;
+  return [...runs.slice(0, -1), { ...last, text }];
 }
 
 /** The text lines whose runs sit on an item's strip of the page. */
@@ -397,31 +438,6 @@ function paragraphFrom(
         width: line.right - line.left,
       };
     }),
-  };
-}
-
-/**
- * Two paragraphs of one column, the second directly under the first, as one:
- * what a reader gets by deleting the break between them. It replaces the
- * items of both, and its text runs straight on from one into the other.
- */
-export function mergeParagraphs(first: Paragraph, second: Paragraph): Paragraph {
-  const styles = [...first.styles];
-  const top = Math.min(first.area.y, second.area.y);
-  const bottom = Math.max(first.area.y + first.area.height, second.area.y + second.area.height);
-  return {
-    ...first,
-    itemIds: [...first.itemIds, ...second.itemIds],
-    area: { ...first.area, y: top, height: bottom - top },
-    text: first.text + second.text,
-    runs: [...first.runs, ...adoptRuns(styles, second.styles, second.runs)],
-    styles,
-    lineCount: first.lineCount + second.lineCount,
-    lastBaseline: second.lastBaseline,
-    lines: [
-      ...first.lines,
-      ...second.lines.map((line) => ({ ...line, start: line.start + first.text.length })),
-    ],
   };
 }
 

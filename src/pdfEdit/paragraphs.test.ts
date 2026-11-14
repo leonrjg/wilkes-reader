@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FlowItem, PageFlow } from "./flow.js";
 import { splitRuns } from "./edits.js";
-import { mergeParagraphs, paragraphsOf, type TextRun } from "./paragraphs.js";
+import { paragraphsOf, runningOnInto, type TextRun } from "./paragraphs.js";
 
 const LEFT = 50;
 const RIGHT = 250;
@@ -116,26 +116,6 @@ describe("paragraphsOf", () => {
   });
 });
 
-describe("mergeParagraphs", () => {
-  it("makes one paragraph of two, running straight on", () => {
-    const lines = [
-      line(0, 40, "First paragraph, one line.", LEFT, 130),
-      line(1, 70, "Second, in another face.", LEFT, 180),
-    ];
-    lines[1].run.fontName = "f2";
-    const [first, second] = paragraphsOf(flowOf(lines, [4, 18]), lines.map(({ run }) => run));
-    const merged = mergeParagraphs(first, second);
-
-    expect(merged.text).toBe("First paragraph, one line.Second, in another face.");
-    expect(merged.itemIds).toEqual(["1:0:0:0", "1:0:0:1"]);
-    expect(merged.area).toEqual({ x: LEFT, y: 40, width: 200, height: 38 });
-    expect(merged.lastBaseline).toBe(second.lastBaseline);
-    // The second paragraph's runs point into the joined table of styles.
-    expect(merged.runs.map((run) => merged.styles[run.style].fontName)).toEqual(["f1", "f2"]);
-    expect(merged.lines[1].start).toBe(first.text.length);
-  });
-});
-
 describe("splitRuns", () => {
   const runs = [
     { text: "plain ", style: 0 },
@@ -150,5 +130,22 @@ describe("splitRuns", () => {
   it("leaves one side empty at either end", () => {
     expect(splitRuns(runs, 0)).toEqual([[], runs]);
     expect(splitRuns(runs, 99)).toEqual([runs, []]);
+  });
+});
+
+describe("runningOnInto", () => {
+  const next = [{ text: "made it.", style: 0 }];
+
+  it("puts a space where a sentence was broken between words", () => {
+    expect(runningOnInto([{ text: "people here", style: 1 }], next)).toEqual([{ text: "people here ", style: 1 }]);
+  });
+
+  it("takes out the hyphen a typesetter broke a word with", () => {
+    expect(runningOnInto([{ text: "re-", style: 0 }], next)).toEqual([{ text: "re", style: 0 }]);
+  });
+
+  it("adds nothing after a space, or before nothing", () => {
+    expect(runningOnInto([{ text: "here ", style: 0 }], next)).toEqual([{ text: "here ", style: 0 }]);
+    expect(runningOnInto([{ text: "here", style: 0 }], [])).toEqual([{ text: "here", style: 0 }]);
   });
 });

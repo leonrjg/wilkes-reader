@@ -12,7 +12,7 @@ import type { PageGeometry } from "./PdfEditLayer.js";
 import { lineHeightPx, liveFace, paragraphTextStyle } from "./paragraphStyle.js";
 import { readRuns, restyleRuns, styleIndexOf, textOfRuns, writeRuns } from "./styledText.js";
 import { typesetText } from "./typeset.js";
-import type { Handoff, PdfEditSession } from "./usePdfEditSession.js";
+import { joinNeighbour, type Handoff, type PdfEditSession } from "./usePdfEditSession.js";
 
 /**
  * A paragraph the reader has changed, as live text over the pages.
@@ -139,7 +139,7 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
       // Nothing of this paragraph is deleted either way; whether the break
       // beside it goes depends on what is on the other side.
       event.preventDefault();
-      sessionRef.current.joinParagraphs(slot, direction, readRuns(text, paragraph));
+      joinNeighbour(sessionRef.current, slot, direction, readRuns(text, paragraph));
     };
     text.addEventListener("beforeinput", onBeforeInput);
     return () => text.removeEventListener("beforeinput", onBeforeInput);
