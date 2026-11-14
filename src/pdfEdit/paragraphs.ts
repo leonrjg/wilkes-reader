@@ -37,6 +37,10 @@ export interface RunStyle {
   color: string;
   /** How far its baseline sits above the line's: positive for a superscript. */
   rise: number;
+  /** Set where the reader made the text bold or italic, or took either off:
+   *  that face of the font's family, rather than what the font itself is. */
+  bold?: boolean;
+  italic?: boolean;
 }
 
 /** A stretch of a paragraph's text in one style, by index into its `styles`. */
@@ -314,8 +318,8 @@ function styleOf(run: TextRun, main: TextRun): RunStyle {
   };
 }
 
-const styleKey = (style: RunStyle) =>
-  `${style.fontName}|${style.fontSize}|${style.color}|${style.rise}`;
+export const styleKey = (style: RunStyle) =>
+  `${style.fontName}|${style.fontSize}|${style.color}|${style.rise}|${style.bold ?? ""}|${style.italic ?? ""}`;
 
 function appendSegment(segments: Segment[], text: string, style: RunStyle): void {
   const last = segments[segments.length - 1];

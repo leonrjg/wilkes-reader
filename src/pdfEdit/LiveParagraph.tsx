@@ -6,7 +6,8 @@ import { estimatedAscent, type EditFragment, type ParagraphEdit } from "./edits.
 import { layoutFragments, type FragmentBox } from "./fragmentFloats.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
 import { lineHeightPx, liveFace, paragraphTextStyle } from "./paragraphStyle.js";
-import { readRuns, restyleRuns, styleIndexOf, textOfRuns, writeRuns } from "./styledText.js";
+import type { RunStyle } from "./paragraphs.js";
+import { readRuns, restyleRuns, sameRuns, styleIndexOf, writeRuns } from "./styledText.js";
 import { typesetText } from "./typeset.js";
 import type { Handoff, PdfEditSession } from "./usePdfEditSession.js";
 
@@ -54,15 +55,24 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   if (boxes.length > 0) lastBoxes.current = boxes;
   const shown = lastBoxes.current;
 
-  const liveFontOf = (fontName: string) => session.liveFontOf(paragraph.page, fontName);
-  const faceOf = (fontName: string) =>
-    liveFace(fontName, session.fontOf(paragraph.page, fontName), liveFontOf(fontName));
+  const liveFontOf = (style: RunStyle) => session.liveFontOf(paragraph.page, style);
+  const faceOf = (style: RunStyle) =>
+    liveFace(style.fontName, session.fontOf(paragraph.page, style.fontName), liveFontOf(style));
   const textStyle = {
-    ...paragraphTextStyle(paragraph, faceOf(paragraph.fontName), scale),
+    ...paragraphTextStyle(paragraph, faceOf(paragraph.styles[paragraph.baseStyle]), scale),
     color: paragraph.color,
   };
   // Which whole fonts have arrived: a string, so an effect can depend on it.
-  const facesReady = paragraph.styles.map((style) => liveFontOf(style.fontName)?.family ?? "").join("|");
+  const facesReady = paragraph.styles.map((style) => liveFontOf(style)?.family ?? "").join("|");
+
+  // What the text says now. Read against the paragraph as it is when asked,
+  // not as it was when whoever asks was set up: its styles can have grown.
+  const paragraphRef = useRef(paragraph);
+  paragraphRef.current = paragraph;
+  const readNow = useCallback(
+    () => (textRef.current ? readRuns(textRef.current, paragraphRef.current) : null),
+    [],
+  );
 
   /** Report what the browser made of the text: how many lines, and where in a
    *  line box this type's baseline sits. */
@@ -93,7 +103,7 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   useLayoutEffect(() => {
     const text = textRef.current;
     if (!text) return;
-    return () => updateEdit(edit.id, { runs: readRuns(text, paragraph) });
+    return () => updateEdit(edit.id, { runs: readRuns(text, paragraphRef.current) });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   }, [edit.id, updateEdit]);
 
@@ -108,17 +118,17 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
     if (!element) return;
     return register({
       element,
-      slot: () => ({ paragraph, edit: editRef.current }),
+      slot: () => ({ paragraph: editRef.current.paragraph, edit: editRef.current }),
       offsetOf: (node, offset) => textOffsetOf(element, node, offset),
-      runs: () => readRuns(element, paragraph),
+      runs: () => readRuns(element, paragraphRef.current),
       settle: () => {
-        const runs = readRuns(element, paragraph);
+        const runs = readRuns(element, paragraphRef.current);
         const current = editRef.current;
-        if (!current.structural && textOfRuns(runs) === paragraph.text) removeEdit(current.id);
+        if (!current.structural && sameRuns(runs, current.paragraph.runs)) removeEdit(current.id);
         else updateEdit(current.id, { runs });
       },
     });
-  }, [register, paragraph, removeEdit, updateEdit]);
+  }, [register, removeEdit, updateEdit]);
 
   // What the paragraph says is the DOM's while it is mounted, and is copied
   // into the session when typing pauses -- which is when it reaches the
@@ -128,8 +138,8 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   const rememberSoon = () => {
     if (remember.current) clearTimeout(remember.current);
     remember.current = setTimeout(() => {
-      const text = textRef.current;
-      if (text) updateEdit(edit.id, { runs: readRuns(text, paragraph) });
+      const runs = readNow();
+      if (runs) updateEdit(edit.id, { runs });
     }, REMEMBER_DELAY_MS);
   };
   useEffect(
@@ -186,7 +196,7 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
       paragraph,
       fragments: session.fragmentsOf(edit),
       ascent: edit.ascent ?? estimatedAscent(paragraph),
-      fontId: (fontName) => liveFontOf(fontName)?.id ?? null,
+      fontId: (style) => liveFontOf(style)?.id ?? null,
       styleOf: (node) => styleIndexOf(text, node, paragraph),
       toPage: (page, clientX) => (clientX - origin) / (geometryOf(page)?.scale ?? scale),
     });

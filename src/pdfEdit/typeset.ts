@@ -1,7 +1,7 @@
 import { lineRects } from "./editableText.js";
 import type { EditFragment } from "./edits.js";
 import type { TypesetText } from "./editExport.js";
-import type { Paragraph } from "./paragraphs.js";
+import type { Paragraph, RunStyle } from "./paragraphs.js";
 
 /**
  * Reading an edited paragraph back off the screen, word by word.
@@ -22,7 +22,7 @@ interface TypesetInput {
   /** A line box's top to its baseline, in page units. */
   ascent: number;
   /** The id a style's font was resolved to, or null if it was not. */
-  fontId: (fontName: string) => string | null;
+  fontId: (style: RunStyle) => string | null;
   /** The style index a text node is in. */
   styleOf: (node: Text) => number;
   /** A screen position on a given page, in that page's units. */
@@ -48,7 +48,7 @@ export function typesetText(input: TypesetInput): TypesetText[] {
   const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
     const style = paragraph.styles[input.styleOf(node)];
-    const font = input.fontId(style.fontName);
+    const font = input.fontId(style);
     const value = node.data;
     for (const word of value.matchAll(/\S+/g)) {
       if (font === null) {

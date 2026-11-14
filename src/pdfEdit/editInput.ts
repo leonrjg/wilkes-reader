@@ -3,6 +3,7 @@ import { insertPlainText, selectText } from "./editableText.js";
 import { replacesItems, splitRuns, type ParagraphEdit } from "./edits.js";
 import type { StyledRun } from "./paragraphs.js";
 import { textOfRuns } from "./styledText.js";
+import { allWear, retyped, type TypeChange } from "./typeChange.js";
 import {
   joinNeighbour,
   type PdfEditSession,
@@ -144,6 +145,40 @@ export function attachEditInput(
     });
   };
 
+  /** Make what a span covers bold or italic -- or, if all of it already is,
+   *  take that off. */
+  const retypeSelection = ({ start, end }: Span, change: TypeChange) => {
+    const ordered = inOrder();
+    const parts = ordered
+      .slice(ordered.indexOf(start.handle), ordered.indexOf(end.handle) + 1)
+      .map((handle) => {
+        const { paragraph } = handle.slot();
+        return {
+          handle,
+          from: handle === start.handle ? start.offset : 0,
+          to: handle === end.handle ? end.offset : lengthOf(handle),
+          styles: paragraph.styles,
+          fontOf: (fontName: string) => session().fontOf(paragraph.page, fontName),
+        };
+      })
+      .filter((part) => part.to > part.from);
+    const value = !parts.every((part) =>
+      allWear(part.handle.runs(), part.styles, part.from, part.to, change, part.fontOf),
+    );
+    for (const part of parts) {
+      const { runs, styles } = retyped(
+        part.handle.runs(),
+        part.styles,
+        part.from,
+        part.to,
+        change,
+        value,
+        part.fontOf,
+      );
+      session().retype(part.handle.slot(), runs, styles, { anchor: part.from, focus: part.to });
+    }
+  };
+
   /** Remove what a span covers. */
   const erase = (span: Span) => {
     if (span.start.handle !== span.end.handle) joinAcross(span, null);
@@ -161,7 +196,7 @@ export function attachEditInput(
     }
     const kind = event.inputType;
     // History is the browser's record of what it typed, which is only live
-    // text; formatting and dragging are not offered across paragraphs.
+    // text; formatting is a key of its own here; dragging text is not offered.
     const notOurs = kind.startsWith("history") || kind.startsWith("format") || /Drag|Drop/.test(kind);
     const { handle } = selected.start;
 
@@ -264,6 +299,14 @@ export function attachEditInput(
       return;
     }
 
+    // Bold and italic, for whatever is selected.
+    const change = typeChangeOf(event);
+    if (change) {
+      event.preventDefault();
+      retypeSelection(selected, change);
+      return;
+    }
+
     // Escape gives a paragraph back to the page. One the reader made has no
     // page to go back to.
     if (event.key === "Escape") {
@@ -325,6 +368,13 @@ export function attachEditInput(
     layer.removeEventListener("focusout", onFocusOut);
     document.removeEventListener("selectionchange", onSelectionChange);
   };
+}
+
+/** Cmd or Ctrl with B or I. */
+function typeChangeOf(event: KeyboardEvent): TypeChange | null {
+  if (event.metaKey === event.ctrlKey || event.altKey || event.shiftKey) return null;
+  const key = event.key.toLowerCase();
+  return key === "b" ? "bold" : key === "i" ? "italic" : null;
 }
 
 const insertedText = (event: InputEvent) =>

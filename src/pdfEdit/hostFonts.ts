@@ -16,6 +16,10 @@ export interface PdfFontRequest {
   bold: boolean;
   italic: boolean;
   generic: "serif" | "sans-serif" | "monospace";
+  /** Set when the weight and slant asked for are not the named font's own but
+   *  another face of its family: the reader made a word bold. The name then
+   *  says which family, not which font. */
+  sibling?: boolean;
 }
 
 /** What a host answers with: a standalone font file, and the name it will
@@ -34,7 +38,7 @@ export interface LiveFont {
 }
 
 const requestKey = (font: PdfFontRequest) =>
-  `${font.name}|${font.bold}|${font.italic}|${font.generic}`;
+  `${font.name}|${font.bold}|${font.italic}|${font.generic}|${font.sibling ?? false}`;
 
 // `document.fonts` is one set for the whole page, so what has been added to it
 // is remembered for the whole page too: two documents set in Times New Roman

@@ -19,7 +19,7 @@ export function writeRuns(
   root: HTMLElement,
   runs: readonly StyledRun[],
   paragraph: Paragraph,
-  faceOf: (fontName: string) => FaceStyle,
+  faceOf: (style: RunStyle) => FaceStyle,
 ): void {
   root.replaceChildren(
     ...runs.map((run) => {
@@ -32,17 +32,19 @@ export function writeRuns(
   );
 }
 
+const faceKey = (style: RunStyle) => `${style.fontName}|${style.bold ?? ""}|${style.italic ?? ""}`;
+
 /** Only what differs from the paragraph's base style is set: the rest is
  *  inherited from the block, which is where the reader's zoom reaches it. */
 function applyStyle(
   span: HTMLElement,
   style: RunStyle,
   paragraph: Paragraph,
-  faceOf: (fontName: string) => FaceStyle,
+  faceOf: (style: RunStyle) => FaceStyle,
 ): void {
   const base = paragraph.styles[paragraph.baseStyle];
-  if (style.fontName !== base.fontName) {
-    const face = faceOf(style.fontName);
+  if (faceKey(style) !== faceKey(base)) {
+    const face = faceOf(style);
     span.style.fontFamily = face.fontFamily;
     span.style.fontWeight = face.fontWeight;
     span.style.fontStyle = face.fontStyle;
@@ -80,7 +82,7 @@ export function styleIndexOf(root: HTMLElement, node: Node, paragraph: Paragraph
 export function restyleRuns(
   root: HTMLElement,
   paragraph: Paragraph,
-  faceOf: (fontName: string) => FaceStyle,
+  faceOf: (style: RunStyle) => FaceStyle,
 ): void {
   for (const span of root.querySelectorAll<HTMLElement>(`[${STYLE_ATTRIBUTE}]`)) {
     const style = paragraph.styles[Number(span.getAttribute(STYLE_ATTRIBUTE))];
@@ -89,3 +91,8 @@ export function restyleRuns(
 }
 
 export const textOfRuns = (runs: readonly StyledRun[]) => runs.map((run) => run.text).join("");
+
+/** Whether two lists of runs say the same thing in the same styles. */
+export function sameRuns(a: readonly StyledRun[], b: readonly StyledRun[]): boolean {
+  return a.length === b.length && a.every((run, index) => run.text === b[index].text && run.style === b[index].style);
+}

@@ -24,10 +24,12 @@ import {
   runningOnInto,
   runsToEdge,
   type Paragraph,
+  type RunStyle,
   type StyledRun,
 } from "./paragraphs.js";
 import { analysePage, PageRasters, type FontInfo, type PageAnalysis } from "./pdfPageSource.js";
 import { layoutPage, reflowDocument } from "./reflow.js";
+import { fontRequestOf } from "./typeChange.js";
 
 /**
  * One document's editing state, and the layout that follows from it.
@@ -117,8 +119,18 @@ export interface PdfEditSession {
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
   /** What is known of a font used on a page, by the name pdf.js loaded it as. */
   fontOf: (page: number, fontName: string) => FontInfo;
-  /** The whole font the host resolved that one to, once it has. */
-  liveFontOf: (page: number, fontName: string) => LiveFont | null;
+  /** The whole font the host resolved a style of a page's paragraph to, once
+   *  it has. */
+  liveFontOf: (page: number, style: RunStyle) => LiveFont | null;
+  /** Set a paragraph in other type: it says `runs`, written against `styles`
+   *  -- its own table of styles, with any new one added at its end. The
+   *  selection is put back over the text it covered. */
+  retype: (
+    slot: Slot,
+    runs: StyledRun[],
+    styles: RunStyle[],
+    selection: { anchor: number; focus: number },
+  ) => void;
   /** An edited paragraph offers to say what it shows, for as long as it is
    *  mounted. Returns the function that withdraws the offer. */
   registerTypesetter: (editId: string, typeset: () => TypesetText[]) => () => void;
@@ -471,14 +483,24 @@ export function usePdfEditSession(
   }, []);
 
   // Every font the analysed pages use is resolved ahead of need, so the whole
-  // font is already there when the first keystroke turns a paragraph live.
+  // font is already there when the first keystroke turns a paragraph live. So
+  // is every other face of one that the reader has set a word in.
   const fontsInUse = useMemo(() => {
     const unique = new Map<string, FontInfo>();
     for (const analysis of analyses.values()) {
       for (const font of analysis.fonts.values()) unique.set(JSON.stringify(font), font);
     }
+    for (const edit of edits) {
+      const fonts = analyses.get(edit.paragraph.page)?.fonts;
+      for (const style of edit.paragraph.styles) {
+        const font = fonts?.get(style.fontName);
+        if (!font) continue;
+        const request = fontRequestOf(style, font);
+        unique.set(JSON.stringify(request), request);
+      }
+    }
     return [...unique.values()];
-  }, [analyses]);
+  }, [analyses, edits]);
   const liveFont = useLiveFonts(resolveFont, fontsInUse);
 
   return useMemo(() => {
@@ -550,6 +572,22 @@ export function usePdfEditSession(
         second,
       ]);
       setHandoff({ editId: second.id, anchor: 0, focus: 0, input: null });
+    };
+
+    const retype: PdfEditSession["retype"] = (slot, runs, styles, selection) => {
+      const was = slot.edit ?? createEdit(newId(), slot.paragraph);
+      const edit: ParagraphEdit = {
+        ...was,
+        paragraph: { ...was.paragraph, styles },
+        runs,
+        revision: was.revision + 1,
+      };
+      setEdits((current) =>
+        current.some((other) => other.id === edit.id)
+          ? current.map((other) => (other.id === edit.id ? edit : other))
+          : [...current, edit],
+      );
+      setHandoff({ editId: edit.id, ...selection, input: null });
     };
 
     /** The slots of the pages from one slot's to another's, in reading order.
@@ -667,10 +705,11 @@ export function usePdfEditSession(
 
       fragmentsOf: (edit) => editFragments(edit, reflow.plans),
       fontOf: (page, fontName) => analyses.get(page)?.fonts.get(fontName) ?? DEFAULT_FONT,
-      liveFontOf: (page, fontName) => {
-        const font = analyses.get(page)?.fonts.get(fontName);
-        return font ? liveFont(font) : null;
+      liveFontOf: (page, style) => {
+        const font = analyses.get(page)?.fonts.get(style.fontName);
+        return font ? liveFont(fontRequestOf(style, font)) : null;
       },
+      retype,
       registerTypesetter,
       discardEdits,
 
