@@ -79,6 +79,48 @@ Links are destinations, never navigations. `#fragment` scrolls within the
 document, a relative link is handed to the host as a path, and anything else
 goes to `openExternal`.
 
+### Editing a PDF in place (prototype)
+
+`<PdfViewer editing />` lets the reader click a paragraph and type into it. The
+lines after it move to make room: down the page, into the next column, and on
+to the next page when a page fills, appending pages past the document's end if
+it comes to that. **Nothing is written to the file** — this changes how the
+pages are drawn, and only that. The text layer, links, decorations and find
+describe the pages as the file has them, so they are not shown while editing.
+
+A PDF page is a picture with no paragraphs in it, so the editor reads one into
+a model that can be laid out again. It lives in `src/pdfEdit/`, in layers that
+each know about one thing:
+
+| Module | Knows about |
+| --- | --- |
+| `flow.ts` | The model: a page is regions, a region is columns, a column is items |
+| `reflow.ts` | Laying that model out again. Pure; no pdf.js, canvas or DOM |
+| `inkGrid.ts`, `pageLayout.ts` | Reading a page's lines and columns off its raster |
+| `documentFrame.ts` | What only several pages can say: running heads, how far down a page goes |
+| `paragraphs.ts` | Which lines are one paragraph, and the text and type it was set in |
+| `edits.ts` | Replacing a paragraph's lines in the flow with live text |
+| `pdfPageSource.ts` | The only module that touches pdf.js |
+| `usePdfEditSession.ts` | The state: what is known about the pages, and what was changed |
+| `PdfEditPage.tsx`, `PdfEditBlocks.tsx` | Drawing: pages recomposed from strips, and the editable text over them |
+
+What it does not do yet, on purpose or otherwise:
+
+- **Save.** There is no way to write an edit back to a PDF.
+- **Refill a page.** Content moves forward and never back: deleting text leaves
+  room at the foot of its page, because nothing in a PDF says whether the break
+  after it was forced.
+- **Split a paragraph between columns.** An edited paragraph beside another
+  column moves as one block; across a page break in a single column it splits
+  line by line.
+- **Match the page's type exactly.** The text is set in the page's embedded
+  font, which is usually a subset: a character it lacks falls back to a generic
+  face. Hyphenation and kerning are the browser's, so a paragraph can wrap to a
+  different number of lines the moment it is taken over.
+- **Understand structure.** Paragraphs, columns and running heads are found by
+  geometry. A formula can be cut between two of its rows, a table can be taken
+  for columns, and a scanned page is one unbreakable block.
+
 ### Installing
 
 ```

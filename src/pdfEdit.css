@@ -1,0 +1,83 @@
+/* Inline PDF editing: a paragraph taken over from the page is live text laid
+ * over the canvas, in a layer that spans the whole scrolled document. */
+
+/* The paragraph under the pointer, before it is taken over. */
+.pdf-edit-target {
+  position: absolute;
+  margin: -2px -3px;
+  padding: 2px 3px;
+  box-sizing: content-box;
+  border-radius: 2px;
+  outline: 1px dashed rgba(59, 130, 246, 0.6);
+  background-color: rgba(59, 130, 246, 0.06);
+  pointer-events: none;
+}
+
+/* `flow-root` makes this the formatting context its floats belong to: they
+   shape the text's line boxes and nothing outside. Only the text itself takes
+   the pointer, so the floats -- which cover the gap between two pages -- do
+   not swallow clicks meant for the pages under them. */
+.pdf-edit-block {
+  position: absolute;
+  display: flow-root;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.pdf-edit-float {
+  pointer-events: none;
+}
+
+/* Deliberately not a formatting context of its own (no overflow, no
+   `flow-root`): its lines have to see the floats beside it. `pre-wrap` is what
+   `plaintext-only` editing assumes, so a typed newline is a line break. */
+.pdf-edit-text {
+  pointer-events: auto;
+  cursor: text;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  /* The embedded face has no bold or italic of its own registered; without
+     this the browser would smear one on top of a face that already is one. */
+  font-synthesis: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.pdf-edit-probe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+  font-synthesis: none;
+}
+
+/* Zero-size and on the baseline, so its top is the baseline's. */
+.pdf-edit-probe > span {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  vertical-align: baseline;
+}
+
+.pdf-edit-outline {
+  position: absolute;
+  margin: -2px -3px;
+  padding: 2px 3px;
+  box-sizing: content-box;
+  border-radius: 2px;
+  outline: 1px solid rgba(59, 130, 246, 0.7);
+  pointer-events: none;
+}
+
+/* Live text is darkened with the page it sits on. */
+.pdf-dark-mode .pdf-edit-text {
+  filter: var(
+    --pdf-dark-filter,
+    invert(var(--pdf-dark-inversion, 0.9)) hue-rotate(180deg) brightness(1.1)
+  );
+}

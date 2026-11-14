@@ -16,6 +16,7 @@
 
 @import "./pdfTextLayer.css";
 @import "./pdfLinkLayer.css";
+@import "./pdfEdit.css";
 
 /* pdf.js declares these on its viewer element, which the package does not
    ship, while the copied text-layer rule reads them under forced colours.

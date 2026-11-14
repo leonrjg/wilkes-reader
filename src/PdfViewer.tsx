@@ -47,6 +47,9 @@ import {
 import type { TextSubstitution } from "./pdfTextSubstitution.js";
 import type { PdfReaderSlots } from "./slots.js";
 import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.js";
+import PdfEditPage from "./pdfEdit/PdfEditPage.js";
+import PdfEditBlocks, { type PageGeometry } from "./pdfEdit/PdfEditBlocks.js";
+import { usePdfEditSession } from "./pdfEdit/usePdfEditSession.js";
 
 export interface PdfViewerProps {
   /** The document to read, and what identifies it.
@@ -89,6 +92,14 @@ export interface PdfViewerProps {
   outline?: PdfOutlineNode[] | null;
   /** Per-page links, on the same terms as `outline`. */
   links?: PageLinks[] | null;
+  /** Edit the document's text in place.
+   *
+   *  A paragraph the reader clicks becomes live text, and what follows it moves
+   *  to make room -- down the page, and on to the next when a page fills. This
+   *  changes how the pages are *drawn* and nothing else: the file is not
+   *  written, and the text layer, links, decorations and find belong to the
+   *  pages as the file has them, so they are not shown while editing. */
+  editing?: boolean;
   slots?: PdfReaderSlots;
   /** Imperative control — navigation, zoom and find as commands. */
   ref?: Ref<PdfReaderHandle>;
@@ -286,6 +297,7 @@ export default function PdfViewer({
   textSubstitutions,
   outline: suppliedOutline,
   links: suppliedLinks,
+  editing = false,
   slots,
   ref,
   onRenderSuccess,
@@ -377,6 +389,14 @@ export default function PdfViewer({
   const contentWidthRef = useRef(contentWidth);
   const { pageMetrics, hasPageMetrics } = usePdfPageMetrics(pdf, documentKey);
   const outline = usePdfOutline(pdf, suppliedOutline);
+  const editSession = usePdfEditSession(pdf ?? null, pageMetrics, editing && hasPageMetrics);
+  // The pages there are to lay out: the document's, and while editing any that
+  // content was pushed onto past its end. Those take the last page's size.
+  const layoutMetrics = useMemo(() => {
+    const last = pageMetrics[pageMetrics.length - 1];
+    const appended = editSession && last ? editSession.pageCount - pageMetrics.length : 0;
+    return appended > 0 ? [...pageMetrics, ...Array<typeof last>(appended).fill(last)] : pageMetrics;
+  }, [pageMetrics, editSession]);
 
   // Where the reader is, as a page + two ratios rather than as pixels. This is
   // the position of record: `scrollTop`/`scrollLeft` are recomputed from it
@@ -507,15 +527,29 @@ export default function PdfViewer({
 
   const getVirtualPageSize = useCallback(
     (index: number) => {
-      const metric = pageMetrics[index];
+      const metric = layoutMetrics[index];
       if (!metric) return 900 + PAGE_GAP_PX;
       return getScaledPageHeight(metric, renderedWidth) + PAGE_GAP_PX;
     },
-    [pageMetrics, renderedWidth],
+    [layoutMetrics, renderedWidth],
   );
+  // Where each page is in the scrolled content, for what is laid over the
+  // document as a whole rather than inside one page.
+  const pageGeometry = useMemo(() => {
+    const tops: number[] = [];
+    let top = 0;
+    for (const metric of layoutMetrics) {
+      tops.push(top);
+      top += getScaledPageHeight(metric, renderedWidth) + PAGE_GAP_PX;
+    }
+    return (pageNumber: number): PageGeometry | null => {
+      const metric = layoutMetrics[pageNumber - 1];
+      return metric ? { top: tops[pageNumber - 1], scale: renderedWidth / metric.width } : null;
+    };
+  }, [layoutMetrics, renderedWidth]);
 
   const virtualizer = useVirtualizer({
-    count: hasPageMetrics ? pageMetrics.length : 0,
+    count: hasPageMetrics ? layoutMetrics.length : 0,
     getScrollElement: () => containerRef.current,
     estimateSize: getVirtualPageSize,
     overscan: 2,
@@ -536,7 +570,7 @@ export default function PdfViewer({
   // new width was laid out in.
   useLayoutEffect(() => {
     virtualizer.measure();
-  }, [virtualizer, renderedWidth, pageMetrics]);
+  }, [virtualizer, renderedWidth, layoutMetrics]);
 
   const virtualItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
@@ -1047,7 +1081,12 @@ export default function PdfViewer({
           </Tooltip>
         )}
         {slots?.toolbar}
-        {numPages && <PageIndicator page={currentPage} pageCount={numPages} />}
+        {numPages && (
+          <PageIndicator
+            page={currentPage}
+            pageCount={editSession ? layoutMetrics.length : numPages}
+          />
+        )}
         <ZoomControls
           zoom={zoom}
           onZoomIn={() => setZoomKeepingPlace((z) => stepPageZoom(z, 1))}
@@ -1086,13 +1125,36 @@ export default function PdfViewer({
               async canvas render. This lets the zoom-recentre effect set
               scrollLeft synchronously without the browser clamping it to a
               stale, not-yet-widened maximum. */}
-          <div style={{ paddingTop, paddingBottom, width: `${contentWidth}px` }}>
+          <div
+            style={{ position: "relative", paddingTop, paddingBottom, width: `${contentWidth}px` }}
+          >
             {virtualItems.map((vItem) => {
               const pageNum = vItem.index + 1;
-              const pageMetric = pageMetrics[vItem.index];
+              const pageMetric = layoutMetrics[vItem.index];
               if (!pageMetric) return null;
               const pageScale = renderedWidth / pageMetric.width;
               const pageHeight = getScaledPageHeight(pageMetric, renderedWidth);
+
+              if (editSession) {
+                return (
+                  <div
+                    key={vItem.key}
+                    data-page-number={pageNum}
+                    style={{ width: "100%", height: pageHeight + PAGE_GAP_PX }}
+                  >
+                    <PdfEditPage
+                      session={editSession}
+                      pageNumber={pageNum}
+                      width={renderedWidth}
+                      size={pageMetric}
+                      onRenderSuccess={() => {
+                        const landing = landingPageRef.current ?? (page || 1);
+                        if (pageNum === landing) signalInitialRender();
+                      }}
+                    />
+                  </div>
+                );
+              }
 
               const isTargetPage = pageNum === targetPage;
               // Per-line emphasis when the relocation produced lines; it
@@ -1260,6 +1322,7 @@ export default function PdfViewer({
                 </div>
               );
             })}
+            {editSession && <PdfEditBlocks session={editSession} geometryOf={pageGeometry} />}
           </div>
         </div>
       </div>
