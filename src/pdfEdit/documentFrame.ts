@@ -10,8 +10,9 @@ import { median, type LayoutRegion, type PageLayout } from "./pageLayout.js";
  * the lines under it move; and a page that ends short -- the last of a chapter
  * -- has room below its last line that its own ink gives no measure of.
  *
- * The answers firm up as more pages are analysed, so this is recomputed from
- * every layout known so far rather than fixed at the first page.
+ * It is asked of a page and its neighbours, not of every page read so far:
+ * the answer for a page must be the same whenever it is asked, or the page
+ * would be laid out one way before the reader scrolled on and another after.
  */
 export interface DocumentFrame {
   /** Null until some page has content. */
@@ -23,6 +24,12 @@ export interface DocumentFrame {
 const FURNITURE_ALIGNMENT = 4;
 /** Kept clear around a fixed area, so a line is not set against it. */
 const FIXED_MARGIN = 0.5;
+/** Columns of one text differ in width by no more than this share of the
+ *  widest: they were set to one measure, and what differs is how far their
+ *  longest lines happen to reach. */
+const ALIKE_WIDTHS = 0.15;
+/** And are each at least this many of their lines' heights wide. */
+const PROSE_WIDTH_LINES = 10;
 
 export function resolveDocumentFrame(layouts: ReadonlyMap<number, PageLayout>): DocumentFrame {
   const heads = edgePositions(layouts, "head");
@@ -133,6 +140,7 @@ export function buildPageFlow(
       columns: region.columns.map((column, columnIndex) =>
         flowColumn(page, `${page}:${index}:${columnIndex}`, region, column, layout.lineGap, locked, stop),
       ),
+      ...(standApart(region) ? { apart: true as const } : {}),
     };
   });
 
@@ -146,6 +154,23 @@ export function buildPageFlow(
     fixed,
     background: layout.background,
   };
+}
+
+/** Whether a region's columns stand side by side rather than being one text
+ *  read down each in turn. Columns of one text are set alike -- as wide as
+ *  each other -- and wide enough to set prose in. A note beside the text is
+ *  narrower than the text; a label, an answer, a table's cells are too narrow
+ *  for a sentence. Taking those for a text's columns pours one into the next
+ *  as soon as either grows. */
+function standApart(region: LayoutRegion): boolean {
+  if (region.columns.length < 2) return false;
+  const widths = region.columns.map((column) => column.width);
+  const widest = Math.max(...widths);
+  const narrowest = Math.min(...widths);
+  const lineHeight = median(
+    region.columns.flatMap((column) => column.bands.map((band) => band.bottom - band.top)),
+  );
+  return widest - narrowest > ALIKE_WIDTHS * widest || narrowest < PROSE_WIDTH_LINES * lineHeight;
 }
 
 function flowColumn(

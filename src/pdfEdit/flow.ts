@@ -69,6 +69,11 @@ export interface FlowRegion {
    *  says so. Null for a page's last region, which runs to the body's foot. */
   depth: number | null;
   columns: FlowColumn[];
+  /** Set where the columns are not one text, read down each in turn, but
+   *  stand side by side, each its own: a note beside the text, a label before
+   *  it, the cells of a table. What one of them cannot hold does not go on in
+   *  the next: it leaves the page, in its own column. */
+  apart?: true;
 }
 
 /** The vertical extent content may occupy on a page. */

@@ -121,6 +121,20 @@ describe("resolveDocumentFrame", () => {
     expect(buildPageFlow(1, layouts.get(1)!, frame).regions).toHaveLength(2);
   });
 
+  it("tells columns of one text from columns that stand side by side", () => {
+    const flowOf = (layout: PageLayout) =>
+      buildPageFlow(1, layout, resolveDocumentFrame(new Map([[1, layout]])));
+    const columnsOf = (layout: PageLayout) => flowOf(layout).regions.find((region) => region.columns.length > 1)!;
+    // Two columns set to one measure.
+    expect(columnsOf(pageWith([...lines(40, 100, 60, 10), ...lines(160, 100, 60, 8)])).apart).toBeUndefined();
+    // A note beside the text: half as wide.
+    expect(columnsOf(pageWith([...lines(40, 60, 60, 10), ...lines(120, 140, 60, 10)])).apart).toBe(true);
+    // The cells of a table: alike, and too narrow to set a sentence in.
+    expect(
+      columnsOf(pageWith([...lines(40, 50, 60, 6), ...lines(110, 50, 60, 6), ...lines(180, 50, 60, 6)])).apart,
+    ).toBe(true);
+  });
+
   it("keeps the rows of a formula together and marks them", () => {
     // Three lines, a formula of three close rows, two more lines.
     const layout = pageWith([

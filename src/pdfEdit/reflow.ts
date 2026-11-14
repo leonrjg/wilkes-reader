@@ -18,6 +18,14 @@ import type { FlowColumn, FlowItem, FlowRegion, PageFlow, Placement } from "./fl
  *      room to spare was put there on purpose -- the end of a chapter, a
  *      balanced pair of columns -- and nothing is taken back across it.
  *   5. What is taken back never makes a region taller than the file made it.
+ *   6. A page that starts lower than its body does is the start of something
+ *      -- a chapter. What is pushed onto it goes into the room above its
+ *      opening, and the opening stays where the file put it until that room
+ *      is used up.
+ *   7. Columns that stand side by side rather than being one text -- a note
+ *      beside the text, the cells of a table -- are each their own: rules 2
+ *      and 4 do not pass anything between them. What one cannot hold goes to
+ *      the next page in its own column.
  *
  * Laying out a page nothing was pushed onto or taken from, whose content did
  * not change, returns every item to where the file drew it: a full column has
@@ -132,9 +140,14 @@ function headOf(next: PageFlow, foot: FlowRegion): FlowItem[] {
   const column = first?.columns[0];
   const opening = column?.items[0];
   if (!first || !column || !opening || !sameShape(foot, first)) return [];
-  // A page that starts lower than its body does is the start of something.
-  if (next.lead > opening.height) return [];
+  if (startsLow(next)) return [];
   return runsOn(foot.columns[foot.columns.length - 1], column) ? column.items : [];
+}
+
+/** Whether a page starts lower than its body does: the start of something. */
+function startsLow(flow: PageFlow): boolean {
+  const opening = flow.regions[0]?.columns[0]?.items[0];
+  return opening !== undefined && flow.lead > opening.height;
 }
 
 /** Whether the file broke between two columns for want of room: the second's
@@ -169,7 +182,12 @@ export function layoutPage(
   following: FlowItem[] = [],
 ): PageLayoutResult {
   // A region emptied by the page before is not there to be laid out.
-  const regions = joinCarried(carried, own.filter(hasItems));
+  const present = own.filter(hasItems);
+  // Onto a page that starts low, what is carried goes above its opening and
+  // is not run into it: the opening keeps its place while there is room.
+  const opensLow = carried.length > 0 && present.length > 0 && startsLow(flow);
+  const regions = opensLow ? [...carried, ...present] : joinCarried(carried, present);
+  const opening = opensLow ? carried.length : -1;
   const endsInOwn = own.length > 0 && hasItems(own[own.length - 1]);
   const placements: Placement[] = [];
   let cursor = flow.body.top + (carried.length > 0 ? 0 : flow.lead);
@@ -178,7 +196,8 @@ export function layoutPage(
 
   for (let index = 0; index < regions.length; index++) {
     const region = regions[index];
-    const top = index === 0 ? cursor : cursor + region.gapBefore;
+    const below = index === 0 ? cursor : cursor + region.gapBefore;
+    const top = index === opening ? Math.max(below, flow.body.top + flow.lead) : below;
     const isFoot = endsInOwn && index === regions.length - 1;
     // A page must take at least one item, or a single item taller than the
     // body would be carried forever.
@@ -235,6 +254,7 @@ function fillRegion(
   mustPlaceFirst: boolean,
   following: FlowItem[],
 ): { placed: PlacedItem[]; height: number; rest: FlowRegion | null; taken: number; spare: number } {
+  if (region.apart) return fillApart(region, limit, mustPlaceFirst);
   const placed: PlacedItem[] = [];
   // What each column still holds: a column can lose its head to the one before.
   const waiting = region.columns.map((column) => column.items);
@@ -285,6 +305,39 @@ function fillRegion(
   return { placed, height, rest: tailRegion(region, displaced), taken: 0, spare: 0 };
 }
 
+/** Fill columns that stand side by side: each holds what of its own fits,
+ *  and the rest of each is the region's remainder, still in its column. */
+function fillApart(
+  region: FlowRegion,
+  limit: number,
+  mustPlaceFirst: boolean,
+): { placed: PlacedItem[]; height: number; rest: FlowRegion | null; taken: number; spare: number } {
+  const placed: PlacedItem[] = [];
+  let height = 0;
+  const left = region.columns.map((column, columnIndex) => {
+    let cursor = column.lead;
+    let above: FlowItem | null = null;
+    let held = 0;
+    for (const item of column.items) {
+      const itemTop: number = above ? cursor - above.trailing + item.gapBefore : cursor - item.leading;
+      const forced = mustPlaceFirst && placed.length === 0;
+      if (itemTop + item.height - item.trailing > limit + EPSILON && !forced) break;
+      placed.push({ item, column: columnIndex, offset: itemTop });
+      cursor = itemTop + item.height;
+      above = item;
+      held++;
+    }
+    if (above) height = Math.max(height, cursor - (above as FlowItem).trailing);
+    return column.items.slice(held);
+  });
+  if (left.every((items) => items.length === 0)) return { placed, height, rest: null, taken: 0, spare: 0 };
+  const rest: FlowRegion = {
+    ...region,
+    columns: region.columns.map((column, index) => ({ ...column, lead: 0, items: left[index] })),
+  };
+  return { placed, height, rest, taken: 0, spare: 0 };
+}
+
 /** What a region could not hold, as a region of the same shape whose first
  *  column carries it. */
 function tailRegion(region: FlowRegion, items: FlowItem[]): FlowRegion {
@@ -307,7 +360,20 @@ function joinCarried(carried: FlowRegion[], own: FlowRegion[]): FlowRegion[] {
   if (carried.length === 0) return own;
   const tail = carried[carried.length - 1];
   const first = own[0];
-  if (!first || !isTail(tail) || !sameShape(tail, first)) return [...carried, ...own];
+  if (!first || !sameShape(tail, first) || tail.apart !== first.apart) return [...carried, ...own];
+  if (tail.apart) {
+    // Side by side, each column goes on from what was carried in it.
+    const joined: FlowRegion = {
+      ...first,
+      gapBefore: tail.gapBefore,
+      columns: first.columns.map((column, index) => {
+        const ahead = tail.columns[index].items;
+        return ahead.length > 0 ? { ...column, lead: 0, items: [...ahead, ...column.items] } : column;
+      }),
+    };
+    return [...carried.slice(0, -1), joined, ...own.slice(1)];
+  }
+  if (!isTail(tail)) return [...carried, ...own];
 
   const joined: FlowRegion = {
     gapBefore: tail.gapBefore,

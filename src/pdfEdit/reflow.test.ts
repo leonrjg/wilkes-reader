@@ -96,6 +96,19 @@ describe("layoutPage", () => {
     expect(tops(flow)[0]).toBe(160);
   });
 
+  it("puts what is pushed onto a page that starts low into the room above its opening", () => {
+    // A chapter's first page: its five lines start 60 below the body's top.
+    const opener = page(2, [column(2, "a", 50, 5, 160)], 60);
+    const pushed = (count: number) => layoutPage(page(1, [column(1, "a", 50, 20 + count, 100)]), []).overflow;
+    // Two lines fit above the opening, which stays where it was.
+    const few = layoutPage(opener, pushed(2));
+    expect(few.placements.map((placement) => placement.y)).toEqual([100, 112, 160, 172, 184, 196, 208]);
+    // Seven do not: the opening is pushed down by what the room could not take.
+    const many = layoutPage(opener, pushed(7));
+    expect(many.placements.map((placement) => placement.y).slice(6, 9)).toEqual([172, 184, 196]);
+    expect(many.placements.find((placement) => placement.item.id === "2:a:0")?.y).toBe(184);
+  });
+
   it("moves a column's overflow to the head of the next column", () => {
     const left = column(1, "l", 50, 21, 100);
     const right = column(1, "r", 300, 5, 100);
@@ -105,6 +118,47 @@ describe("layoutPage", () => {
     // The right column's own lines follow it, one line further down.
     expect(placements.find((placement) => placement.item.id === "1:r:0")?.y).toBe(112);
     expect(overflow).toEqual([]);
+  });
+});
+
+describe("layoutPage, with columns that stand side by side", () => {
+  /** A note of `notes` lines beside a text of `lines`. */
+  const beside = (number: number, notes: number, lines: number): PageFlow => {
+    const flow = page(number, [column(number, "note", 40, notes, 100), column(number, "text", 300, lines, 100)]);
+    flow.regions[0].apart = true;
+    return flow;
+  };
+
+  it("sends what a column cannot hold to the next page, not to the column beside it", () => {
+    const flow = beside(1, 23, 6);
+    const laid = layoutPage(flow, []);
+    // Twenty of the note's lines fit; the text beside it is where it was.
+    expect(laid.placements.filter((placement) => placement.x === 40)).toHaveLength(20);
+    expect(laid.placements.filter((placement) => placement.x === 300).map((placement) => placement.y)).toEqual(
+      [100, 112, 124, 136, 148, 160],
+    );
+    const [rest] = laid.overflow;
+    expect(rest.apart).toBe(true);
+    expect(rest.columns.map((carried) => carried.items.length)).toEqual([3, 0]);
+  });
+
+  it("goes on in the same column of the next page, ahead of what is there", () => {
+    const { overflow } = layoutPage(beside(1, 23, 6), []);
+    const next = layoutPage(beside(2, 4, 5), overflow);
+    const note = next.placements.filter((placement) => placement.x === 40);
+    expect(note.map((placement) => placement.item.id).slice(0, 4)).toEqual([
+      "1:note:20", "1:note:21", "1:note:22", "2:note:0",
+    ]);
+    // The text beside it was pushed by nothing, and has not moved.
+    expect(next.placements.filter((placement) => placement.x === 300).map((placement) => placement.y)).toEqual(
+      [100, 112, 124, 136, 148],
+    );
+  });
+
+  it("takes nothing from the column beside it into room it has", () => {
+    // With one text in two columns the first would take the second's lines.
+    const laid = layoutPage(beside(1, 14, 20), []);
+    expect(laid.placements.filter((placement) => placement.x === 40)).toHaveLength(14);
   });
 });
 
