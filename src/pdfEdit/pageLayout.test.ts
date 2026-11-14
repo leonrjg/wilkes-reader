@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BoundingBox } from "../documentCoordinates.js";
 import { buildPageFlow, resolveDocumentFrame } from "./documentFrame.js";
 import { inkGridFromImage } from "./inkGrid.js";
 import { layoutFromInk, type PageLayout } from "./pageLayout.js";
@@ -118,5 +119,29 @@ describe("resolveDocumentFrame", () => {
     const frame = resolveDocumentFrame(layouts);
     expect(frame.isFurniture(1, "head")).toBe(false);
     expect(buildPageFlow(1, layouts.get(1)!, frame).regions).toHaveLength(2);
+  });
+
+  it("keeps the rows of a formula together and marks them", () => {
+    // Three lines, a formula of three close rows, two more lines.
+    const layout = pageWith([
+      ...lines(40, 220, 60, 3),
+      [100, 104, 60, 6], [100, 112, 60, 2], [100, 116, 60, 6],
+      ...lines(40, 220, 134, 2),
+    ]);
+    const layouts = new Map<number, PageLayout>([[1, layout]]);
+    const frame = resolveDocumentFrame(layouts);
+    const formula = { x: 95, y: 102, width: 70, height: 22 };
+
+    const itemsOf = (locked: BoundingBox[]) =>
+      buildPageFlow(1, layout, frame, locked).regions.flatMap((region) => region.columns[0].items);
+    const plain = itemsOf([]);
+    const flow = itemsOf([formula]);
+    expect(plain).toHaveLength(8);
+    expect(flow).toHaveLength(6);
+    const locked = flow.filter((item) => item.content.kind === "slice" && item.content.locked);
+    expect(locked).toHaveLength(1);
+    expect(locked[0]).toMatchObject({ height: 18, id: plain[3].id });
+    // The lines either side keep the ids they would have had without it.
+    expect(flow[4].id).toBe(plain[6].id);
   });
 });

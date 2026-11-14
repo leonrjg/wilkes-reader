@@ -94,6 +94,20 @@ describe("paragraphsOf", () => {
     expect(paragraph.styles[paragraph.baseStyle].fontName).toBe("f1");
   });
 
+  it("withholds a paragraph that has a locked line in it", () => {
+    const lines = [
+      line(0, 40, "A sentence that runs into a"),
+      line(1, 52, "formula set in its own line"),
+      line(2, 64, "and carries on after it.", LEFT, 160),
+      line(3, 90, "Another paragraph entirely.", LEFT, 180),
+    ];
+    const flow = flowOf(lines, [4, 4, 4, 18]);
+    const locked = flow.regions[0].columns[0].items[1];
+    if (locked.content.kind === "slice") locked.content.locked = true;
+    const paragraphs = paragraphsOf(flow, lines.map(({ run }) => run));
+    expect(paragraphs.map((paragraph) => paragraph.text)).toEqual(["Another paragraph entirely."]);
+  });
+
   it("offers nothing for a strip with no text on it", () => {
     const lines = [line(0, 40, "Some text above a figure.")];
     const figure = line(1, 60, "");

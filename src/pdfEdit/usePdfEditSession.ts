@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { BoundingBox } from "../documentCoordinates.js";
 import type { PDFDocumentProxy } from "../pdfjs.js";
 import { blankPageFlow, buildPageFlow, resolveDocumentFrame } from "./documentFrame.js";
 import { buildExport, type PdfEditExport, type TypesetText } from "./editExport.js";
@@ -114,6 +115,9 @@ export function usePdfEditSession(
   /** What names the document in the host's store of unsaved edits. */
   documentKey: string,
   store: PdfEditStore | undefined,
+  /** Areas the host knows are not prose -- formulas, tables. They move whole
+   *  and are not offered as text to edit. */
+  lockedAreas: ReadonlyArray<{ page: number; bbox: BoundingBox }> | undefined,
 ): PdfEditSession | null {
   const [analyses, setAnalyses] = useState<ReadonlyMap<number, PageAnalysis>>(() => new Map());
   const [edits, setEdits] = useState<readonly ParagraphEdit[]>([]);
@@ -199,7 +203,12 @@ export function usePdfEditSession(
       } else {
         const analysis = analyses.get(page);
         if (!analysis) return null;
-        flow = buildPageFlow(page, analysis.layout, frame);
+        flow = buildPageFlow(
+          page,
+          analysis.layout,
+          frame,
+          (lockedAreas ?? []).filter((area) => area.page === page).map((area) => area.bbox),
+        );
       }
       flows.set(page, flow);
       return flow;
@@ -250,7 +259,7 @@ export function usePdfEditSession(
     };
 
     return { flowOf, paragraphsOn, identityPlacements, follows };
-  }, [analyses, pageSizes, documentPages]);
+  }, [analyses, pageSizes, documentPages, lockedAreas]);
 
   const reflow = useMemo(
     () =>

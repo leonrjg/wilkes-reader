@@ -406,6 +406,9 @@ export default function PdfViewer({
     resolvePdfFont,
     documentKey,
     pdfEdits,
+    // What the host's reading says is a formula or a table is exactly what
+    // must not be re-set as prose.
+    textSubstitutions,
   );
   // The pages there are to lay out: the document's, and while editing any that
   // content was pushed onto past its end. Those take the last page's size.

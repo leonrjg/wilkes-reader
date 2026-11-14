@@ -87,7 +87,13 @@ function bodyRegions(
 
 /** A page as the reflow engine takes it: its body regions as flowing items,
  *  its furniture as fixed areas. */
-export function buildPageFlow(page: number, layout: PageLayout, frame: DocumentFrame): PageFlow {
+export function buildPageFlow(
+  page: number,
+  layout: PageLayout,
+  frame: DocumentFrame,
+  /** Areas of this page the host knows are not prose: formulas, tables. */
+  locked: readonly BoundingBox[] = [],
+): PageFlow {
   const fixed: BoundingBox[] = [];
   const regions: FlowRegion[] = [];
   let previous: LayoutRegion | null = null;
@@ -109,7 +115,7 @@ export function buildPageFlow(page: number, layout: PageLayout, frame: DocumentF
     regions.push({
       gapBefore: previous ? region.top - previous.bottom : layout.lineGap,
       columns: region.columns.map((column, columnIndex) =>
-        flowColumn(page, `${page}:${regionIndex}:${columnIndex}`, region, column, layout.lineGap),
+        flowColumn(page, `${page}:${regionIndex}:${columnIndex}`, region, column, layout.lineGap, locked),
       ),
     });
     first ??= region;
@@ -144,28 +150,71 @@ function flowColumn(
   region: LayoutRegion,
   column: LayoutRegion["columns"][number],
   lineGap: number,
+  locked: readonly BoundingBox[],
 ): FlowColumn {
-  const gaps = column.bands.slice(1).map((band, index) => band.top - column.bands[index].bottom);
+  const pieces = lockedTogether(column, locked);
+  const gaps = pieces.slice(1).map((piece, index) => piece.top - pieces[index].bottom);
   // A column's first item has no gap of its own on the page it was read from;
   // it needs one the moment something is pushed in ahead of it.
   const typicalGap = gaps.length > 0 ? median(gaps) : lineGap;
-  const items: FlowItem[] = column.bands.map((band, index) => ({
-    id: `${idPrefix}:${index}`,
-    height: band.bottom - band.top,
+  const items: FlowItem[] = pieces.map((piece, index) => ({
+    id: `${idPrefix}:${piece.firstBand}`,
+    height: piece.bottom - piece.top,
     gapBefore: index === 0 ? typicalGap : gaps[index - 1],
     trailing: 0,
     content: {
       kind: "slice",
       page,
-      rect: { x: column.x, y: band.top, width: column.width, height: band.bottom - band.top },
+      rect: { x: column.x, y: piece.top, width: column.width, height: piece.bottom - piece.top },
+      ...(piece.locked ? { locked: true } : {}),
     },
   }));
   return {
     x: column.x,
     width: column.width,
-    lead: column.bands.length > 0 ? column.bands[0].top - region.top : 0,
+    lead: pieces.length > 0 ? pieces[0].top - region.top : 0,
     items,
   };
+}
+
+interface Piece {
+  top: number;
+  bottom: number;
+  /** The band it starts at, which is what its id is taken from: an id must not
+   *  change because a neighbour was found to belong to a formula. */
+  firstBand: number;
+  locked: boolean;
+}
+
+/** A column's bands as the pieces that move: one each, except that the bands a
+ *  locked area covers are one piece together. A formula is several rows of
+ *  ink -- a numerator, a bar, a denominator -- and a page break between two of
+ *  them would be a break through the middle of it. */
+function lockedTogether(
+  column: LayoutRegion["columns"][number],
+  locked: readonly BoundingBox[],
+): Piece[] {
+  const areaOf = (band: { top: number; bottom: number }) =>
+    locked.findIndex((area) => {
+      const overlap =
+        Math.min(band.bottom, area.y + area.height) - Math.max(band.top, area.y);
+      const beside = area.x < column.x + column.width && area.x + area.width > column.x;
+      return beside && overlap > (band.bottom - band.top) / 2;
+    });
+
+  const pieces: Piece[] = [];
+  let previousArea = -1;
+  column.bands.forEach((band, index) => {
+    const area = areaOf(band);
+    const last = pieces[pieces.length - 1];
+    if (area >= 0 && area === previousArea && last) {
+      last.bottom = band.bottom;
+    } else {
+      pieces.push({ top: band.top, bottom: band.bottom, firstBand: index, locked: area >= 0 });
+    }
+    previousArea = area;
+  });
+  return pieces;
 }
 
 /** A page past the document's end, there to take what the last page could not. */

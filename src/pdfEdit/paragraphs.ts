@@ -164,7 +164,11 @@ function columnParagraphs(
   const paragraphs: Paragraph[] = [];
   let group: typeof lined = [];
   const close = () => {
-    if (group.length > 0) {
+    // A paragraph with a locked line in it -- a formula set in the middle of
+    // a sentence -- is withheld whole. Offering the lines around the formula
+    // would let the reader re-wrap a sentence with a hole in it.
+    const locked = group.some(({ item }) => item.content.kind === "slice" && item.content.locked);
+    if (group.length > 0 && !locked) {
       paragraphs.push(paragraphFrom(page, group, column, columnRight, splittable));
     }
     group = [];

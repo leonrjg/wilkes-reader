@@ -20,8 +20,10 @@ import type { BoundingBox } from "../documentCoordinates.js";
 
 /** What an item draws. */
 export type FlowContent =
-  /** A horizontal strip of a page as the file drew it. */
-  | { kind: "slice"; page: number; rect: BoundingBox }
+  /** A horizontal strip of a page as the file drew it. `locked` when the host
+   *  says what is on it is not prose -- a formula, a table: it then moves as
+   *  one piece and is not offered as text to edit. */
+  | { kind: "slice"; page: number; rect: BoundingBox; locked?: boolean }
   /** `lines` consecutive line boxes of an edited paragraph, starting at `line`. */
   | { kind: "edit"; editId: string; line: number; lines: number };
 
