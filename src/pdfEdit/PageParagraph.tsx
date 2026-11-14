@@ -1,21 +1,22 @@
 import { useEffect, useRef } from "react";
 import { PARAGRAPH_HOST } from "./caretTravel.js";
+import type { RegisterParagraph } from "./editInput.js";
 import { textOffsetOf } from "./editableText.js";
-import { estimatedAscent, splitRuns } from "./edits.js";
+import { estimatedAscent } from "./edits.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
 import type { Paragraph } from "./paragraphs.js";
 import { lineHeightPx, pageFace, paragraphTextStyle } from "./paragraphStyle.js";
-import { joinNeighbour, type PdfEditSession, type PendingInput } from "./usePdfEditSession.js";
+import type { PdfEditSession } from "./usePdfEditSession.js";
 
 /**
  * A paragraph nobody has changed: the page's own rendering, with a caret.
  *
  * The page keeps drawing the paragraph. Over each of its lines sits the same
- * text, invisible and editable, so a click puts a caret between two letters
- * and a selection covers words -- but there is nothing to see until the reader
- * types. Only then is the paragraph taken from the page and set as live text
+ * text, invisible, so a click puts a caret between two letters and a selection
+ * covers words -- but there is nothing to see until the reader types. Only
+ * then is the paragraph taken from the page and set as live text
  * (`LiveParagraph`); the keystroke that asked for it is passed along and
- * happens there.
+ * happens there. Nothing is ever typed into this.
  *
  * This is what lets every paragraph be editable without every paragraph being
  * re-set: one the reader only passes through keeps the page's exact line
@@ -26,86 +27,22 @@ interface PageParagraphProps {
   session: PdfEditSession;
   paragraph: Paragraph;
   geometryOf: (page: number) => PageGeometry | null;
+  register: RegisterParagraph;
 }
 
-export default function PageParagraph({ session, paragraph, geometryOf }: PageParagraphProps) {
+export default function PageParagraph({ session, paragraph, geometryOf, register }: PageParagraphProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const { beginEdit } = session;
-  // Read when a key is pressed, not when the listener was attached: what a
-  // paragraph's neighbours are changes with every edit around it.
-  const sessionRef = useRef(session);
-  sessionRef.current = session;
 
-  // Native listeners: React's `onBeforeInput` is its own synthesis from key
-  // events, and has neither an input type nor the range it applies to.
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-
-    const handOver = (anchor: number, focus: number, input: PendingInput | null) =>
-      beginEdit(paragraph, { anchor, focus, input });
-
-    const onBeforeInput = (event: InputEvent) => {
-      // The text here is the page's and stays the page's: nothing is ever
-      // typed into this element.
-      event.preventDefault();
-      if (event.inputType.startsWith("history") || event.inputType.startsWith("format")) return;
-      const range = event.getTargetRanges()[0] ?? window.getSelection()?.getRangeAt(0);
-      if (!range) return;
-      const start = offsetIn(host, paragraph, range.startContainer, range.startOffset);
-      const end = offsetIn(host, paragraph, range.endContainer, range.endOffset);
-      const slot = { paragraph, edit: null };
-      const input = pendingInput(event);
-      // A deletion with nothing in range is Backspace before the paragraph's
-      // first character or Delete after its last: nothing of this paragraph
-      // goes, but the break between it and its neighbour does.
-      if (input.kind === "delete" && start === end) {
-        if (event.inputType.endsWith("Backward") && start === 0) {
-          joinNeighbour(sessionRef.current, slot, -1, paragraph.runs);
-        } else if (event.inputType.endsWith("Forward") && start >= paragraph.text.length) {
-          joinNeighbour(sessionRef.current, slot, 1, paragraph.runs);
-        }
-        return;
-      }
-      handOver(start, end, input);
-    };
-
-    // A composition cannot be cancelled and replayed, so the paragraph is
-    // handed over as it starts and the composition begins again in live text.
-    const onCompositionStart = () => {
-      const selection = window.getSelection();
-      if (!selection?.anchorNode || !selection.focusNode) return;
-      handOver(
-        offsetIn(host, paragraph, selection.anchorNode, selection.anchorOffset),
-        offsetIn(host, paragraph, selection.focusNode, selection.focusOffset),
-        null,
-      );
-    };
-
-    // Enter makes two paragraphs of this one. Caught as a key because
-    // plain-text editing reports Enter and Shift+Enter as the same input; with
-    // Shift it goes on to become a line break inside the paragraph.
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
-      const range = window.getSelection()?.getRangeAt(0);
-      if (!range) return;
-      event.preventDefault();
-      sessionRef.current.splitParagraph(
-        { paragraph, edit: null },
-        splitRuns(paragraph.runs, offsetIn(host, paragraph, range.startContainer, range.startOffset))[0],
-        splitRuns(paragraph.runs, offsetIn(host, paragraph, range.endContainer, range.endOffset))[1],
-      );
-    };
-
-    host.addEventListener("beforeinput", onBeforeInput);
-    host.addEventListener("compositionstart", onCompositionStart);
-    host.addEventListener("keydown", onKeyDown);
-    return () => {
-      host.removeEventListener("beforeinput", onBeforeInput);
-      host.removeEventListener("compositionstart", onCompositionStart);
-      host.removeEventListener("keydown", onKeyDown);
-    };
-  }, [paragraph, beginEdit]);
+    const element = hostRef.current;
+    if (!element) return;
+    return register({
+      element,
+      slot: () => ({ paragraph, edit: null }),
+      offsetOf: (node, offset) => offsetIn(element, paragraph, node, offset),
+      runs: () => paragraph.runs,
+    });
+  }, [register, paragraph]);
 
   const face = pageFace(paragraph.fontName, session.fontOf(paragraph.page, paragraph.fontName));
   const ascent = estimatedAscent(paragraph);
@@ -130,28 +67,18 @@ export default function PageParagraph({ session, paragraph, geometryOf }: PagePa
       </div>
     );
   });
-  // Not placed yet: its page's layout is still waiting on an analysis.
-  if (lines.every((line) => line === null)) return null;
-
+  // With no lines when it is not placed yet: its page's layout is still
+  // waiting on an analysis.
   return (
     <div
       ref={hostRef}
       className="pdf-edit-page-text"
       style={{ caretColor: paragraph.color }}
-      contentEditable="plaintext-only"
-      suppressContentEditableWarning
-      spellCheck={false}
       {...{ [PARAGRAPH_HOST]: "" }}
     >
       {lines}
     </div>
   );
-}
-
-function pendingInput(event: InputEvent): PendingInput {
-  if (event.inputType.startsWith("delete")) return { kind: "delete" };
-  if (event.inputType === "insertLineBreak") return { kind: "insert", text: "\n" };
-  return { kind: "insert", text: event.data ?? event.dataTransfer?.getData("text/plain") ?? "" };
 }
 
 /** A DOM position over the page's lines, as an offset into the paragraph's

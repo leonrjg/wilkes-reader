@@ -11,6 +11,7 @@
   width: 0;
   height: 0;
   z-index: 2;
+  outline: none;
 }
 
 /* An untouched paragraph: the page draws it, and this lays the same text over

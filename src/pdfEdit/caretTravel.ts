@@ -1,17 +1,17 @@
-import type { KeyboardEvent } from "react";
 import { caretRect, lineRects, placeCaretAtPoint, selectText, textLength, textOffsetOf } from "./editableText.js";
 
 /**
  * Carrying the caret from one paragraph to the next.
  *
- * Each paragraph is its own editable element, so the browser stops the caret
- * at a paragraph's edge. Reading does not stop there, and neither should an
- * arrow key: at the first or last line, or the first or last character, the
- * caret goes on into the neighbouring paragraph, keeping its column as it
- * would between two lines of one.
+ * A paragraph's lines are placed one by one over the page, and the paragraphs
+ * of a page column by column, so what is next to what on screen is not what is
+ * next to what in the document. An arrow key at the edge of a paragraph -- its
+ * first or last line, its first or last character -- is therefore taken here
+ * to the neighbouring paragraph, keeping its column as it would between two
+ * lines of one.
  */
 
-/** Marks the editable element of a paragraph. Their order in the document is
+/** Marks the element a paragraph's text is in. Their order in the document is
  *  reading order. */
 export const PARAGRAPH_HOST = "data-pdf-edit-paragraph";
 
@@ -22,10 +22,13 @@ export function travelOnArrow(event: KeyboardEvent, layer: HTMLElement | null): 
   // With a modifier an arrow extends a selection or jumps by word or line,
   // and all of those are the browser's within one paragraph.
   if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return;
-  const target = event.target instanceof Element ? event.target : null;
-  const host = target?.closest<HTMLElement>(`[${PARAGRAPH_HOST}]`);
   const selection = window.getSelection();
-  if (!host || !selection?.isCollapsed || !selection.anchorNode) return;
+  if (!selection?.isCollapsed || !selection.anchorNode) return;
+  const { anchorNode } = selection;
+  const host = (anchorNode instanceof Element ? anchorNode : anchorNode.parentElement)?.closest<HTMLElement>(
+    `[${PARAGRAPH_HOST}]`,
+  );
+  if (!host) return;
 
   const hosts = [...layer.querySelectorAll<HTMLElement>(`[${PARAGRAPH_HOST}]`)];
   const index = hosts.indexOf(host);
@@ -62,7 +65,6 @@ export function travelOnArrow(event: KeyboardEvent, layer: HTMLElement | null): 
 /** Put the caret in a paragraph: at its first or last character, or -- coming
  *  from the line above or below -- at the given column of its nearest line. */
 function enter(host: HTMLElement, edge: Edge, column: number | null): void {
-  host.focus({ preventScroll: true });
   const lines = lineRects(host);
   const line = edge === "start" ? lines[0] : lines[lines.length - 1];
   const placed =

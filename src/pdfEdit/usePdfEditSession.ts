@@ -104,7 +104,7 @@ export interface PdfEditSession {
   /** Make one paragraph of `first`, `last` and every paragraph between them.
    *  It says `firstRuns` and then `lastRuns` -- what is to be left of the two
    *  ends -- and stands where `first` stood; the rest give up their places.
-   *  `input` is a keystroke still to happen where the two meet. False when
+   *  `input` is a keystroke still to happen where the two meet. Null when
    *  what lies between them has not all been read. */
   joinParagraphs: (
     first: Slot,
@@ -112,7 +112,7 @@ export interface PdfEditSession {
     firstRuns: StyledRun[],
     lastRuns: StyledRun[],
     input?: PendingInput | null,
-  ) => boolean;
+  ) => ParagraphEdit | null;
   locate: (itemId: string) => Located | null;
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
   /** What is known of a font used on a page, by the name pdf.js loaded it as. */
@@ -158,7 +158,7 @@ export function joinNeighbour(
   // A paragraph the page broke across a column or a page is in two pieces
   // that were never two paragraphs: the join is in the middle of a sentence.
   if (!first.edit && runsToEdge(first.paragraph)) firstRuns = runningOnInto(firstRuns, lastRuns);
-  return session.joinParagraphs(first, last, firstRuns, lastRuns);
+  return session.joinParagraphs(first, last, firstRuns, lastRuns) !== null;
 }
 
 const DEFAULT_FONT: FontInfo = { name: "", generic: "serif", bold: false, italic: false };
@@ -581,10 +581,10 @@ export function usePdfEditSession(
 
     const joinParagraphs: PdfEditSession["joinParagraphs"] = (first, last, firstRuns, lastRuns, input = null) => {
       const slots = slotsAcross(first.paragraph.page, last.paragraph.page);
-      if (!slots) return false;
+      if (!slots) return null;
       const start = slots.findIndex((candidate) => sameSlot(candidate, first));
       const end = slots.findIndex((candidate) => sameSlot(candidate, last));
-      if (start < 0 || end <= start) return false;
+      if (start < 0 || end <= start) return null;
       const taken = slots.slice(start + 1, end + 1);
 
       // The result stands where the first stood and is set as it was set.
@@ -619,7 +619,7 @@ export function usePdfEditSession(
       ]);
       const seam = textLength(firstRuns);
       setHandoff({ editId: result.id, anchor: seam, focus: seam, input });
-      return true;
+      return result;
     };
     // One list for every page: a page's view is asked for on each of its
     // renders, and must be handed the same array until the layout changes.

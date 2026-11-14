@@ -115,3 +115,14 @@ function rangeAtPoint(clientX: number, clientY: number): Range | null {
   // WebKit has only the older name.
   return document.caretRangeFromPoint?.(clientX, clientY) ?? null;
 }
+
+/** Type text at the caret, through the browser's own editing commands so that
+ *  it is in the browser's undo history. A newline in it is a line break inside
+ *  the paragraph: typed as text, it would have the browser split the element
+ *  the paragraph is in. */
+export function insertPlainText(text: string): void {
+  text.split(/\r\n?|\n/).forEach((piece, index) => {
+    if (index > 0) document.execCommand("insertLineBreak");
+    if (piece) document.execCommand("insertText", false, piece);
+  });
+}

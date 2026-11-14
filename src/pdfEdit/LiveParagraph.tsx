@@ -1,24 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { PARAGRAPH_HOST } from "./caretTravel.js";
-import { lineRects, selectText, textLength, textOffsetOf } from "./editableText.js";
-import {
-  estimatedAscent,
-  replacesItems,
-  splitRuns,
-  type EditFragment,
-  type ParagraphEdit,
-} from "./edits.js";
+import type { RegisterParagraph } from "./editInput.js";
+import { insertPlainText, lineRects, selectText, textOffsetOf } from "./editableText.js";
+import { estimatedAscent, type EditFragment, type ParagraphEdit } from "./edits.js";
 import { layoutFragments, type FragmentBox } from "./fragmentFloats.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
 import { lineHeightPx, liveFace, paragraphTextStyle } from "./paragraphStyle.js";
 import { readRuns, restyleRuns, styleIndexOf, textOfRuns, writeRuns } from "./styledText.js";
 import { typesetText } from "./typeset.js";
-import { joinNeighbour, type Handoff, type PdfEditSession } from "./usePdfEditSession.js";
+import type { Handoff, PdfEditSession } from "./usePdfEditSession.js";
 
 /**
  * A paragraph the reader has changed, as live text over the pages.
  *
- * It is one `contenteditable` for the whole paragraph, however many pages it
+ * It is one run of text for the whole paragraph, however many pages it
  * crosses, so the caret, selection, undo and input methods are the browser's
  * and behave as they do anywhere else. The browser also does the line
  * breaking: the reflow engine is told how many lines the text wrapped to and
@@ -33,6 +28,7 @@ interface LiveParagraphProps {
   session: PdfEditSession;
   edit: ParagraphEdit;
   geometryOf: (page: number) => PageGeometry | null;
+  register: RegisterParagraph;
 }
 
 /** Extra width on the text box, so a line the page set full is not wrapped by
@@ -42,7 +38,7 @@ const WIDTH_SLACK_PX = 1;
  *  DOM. Long enough not to run on every keystroke, short enough that little is
  *  lost if the reader leaves. */
 const REMEMBER_DELAY_MS = 400;
-export default function LiveParagraph({ session, edit, geometryOf }: LiveParagraphProps) {
+export default function LiveParagraph({ session, edit, geometryOf, register }: LiveParagraphProps) {
   const textRef = useRef<HTMLDivElement>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
   const { paragraph } = edit;
@@ -101,37 +97,28 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   }, [edit.id, updateEdit]);
 
-  // Backspace or Delete at the paragraph's edge changes which paragraphs there
-  // are rather than what one says. A native listener: React's `onBeforeInput`
-  // has no input type to tell a deletion's direction by.
-  const sessionRef = useRef(session);
-  sessionRef.current = session;
+  // What the input handling needs of this paragraph. When the caret leaves,
+  // a paragraph back to saying what the page says is given back to the page,
+  // which sets it better than this can. Not one that is half of a split or
+  // the whole of a join: its being here is the change.
   const editRef = useRef(edit);
   editRef.current = edit;
   useEffect(() => {
-    const text = textRef.current;
-    if (!text) return;
-    const onBeforeInput = (event: InputEvent) => {
-      const selection = window.getSelection();
-      if (!selection?.anchorNode || selection.rangeCount === 0) return;
-      const slot = { paragraph, edit: editRef.current };
-      if (!selection.isCollapsed || !event.inputType.startsWith("delete")) return;
-      const offset = textOffsetOf(text, selection.anchorNode, selection.anchorOffset);
-      const direction =
-        event.inputType.endsWith("Backward") && offset === 0
-          ? -1
-          : event.inputType.endsWith("Forward") && offset >= textLength(text)
-            ? 1
-            : null;
-      if (direction === null) return;
-      // Nothing of this paragraph is deleted either way; whether the break
-      // beside it goes depends on what is on the other side.
-      event.preventDefault();
-      joinNeighbour(sessionRef.current, slot, direction, readRuns(text, paragraph));
-    };
-    text.addEventListener("beforeinput", onBeforeInput);
-    return () => text.removeEventListener("beforeinput", onBeforeInput);
-  }, [paragraph]);
+    const element = textRef.current;
+    if (!element) return;
+    return register({
+      element,
+      slot: () => ({ paragraph, edit: editRef.current }),
+      offsetOf: (node, offset) => textOffsetOf(element, node, offset),
+      runs: () => readRuns(element, paragraph),
+      settle: () => {
+        const runs = readRuns(element, paragraph);
+        const current = editRef.current;
+        if (!current.structural && textOfRuns(runs) === paragraph.text) removeEdit(current.id);
+        else updateEdit(current.id, { runs });
+      },
+    });
+  }, [register, paragraph, removeEdit, updateEdit]);
 
   // What the paragraph says is the DOM's while it is mounted, and is copied
   // into the session when typing pauses -- which is when it reaches the
@@ -151,6 +138,21 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
     },
     [],
   );
+
+  // Whatever changes the text -- typing, undo, a paste -- is followed from the
+  // text itself: input events are the layer's, not this element's.
+  const typedRef = useRef(() => {});
+  typedRef.current = () => {
+    measure();
+    rememberSoon();
+  };
+  useEffect(() => {
+    const text = textRef.current;
+    if (!text) return;
+    const observer = new MutationObserver(() => typedRef.current());
+    observer.observe(text, { characterData: true, childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
 
   // Taken over from the page mid-keystroke: put the caret back where it was
   // over the page's rendering, then let the keystroke happen.
@@ -226,6 +228,7 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
         <div
           key={index}
           className="pdf-edit-float"
+          contentEditable={false}
           style={{
             float: float.side,
             clear: float.clear ? "both" : "none",
@@ -237,55 +240,16 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
       <div
         ref={textRef}
         className="pdf-edit-text"
-        contentEditable="plaintext-only"
-        suppressContentEditableWarning
-        spellCheck={false}
         style={{
           ...textStyle,
           textAlign: paragraph.align,
           textIndent: paragraph.indent * scale,
         }}
-        onInput={() => {
-          measure();
-          rememberSoon();
-        }}
-        onBlur={(event) => {
-          const runs = readRuns(event.currentTarget, paragraph);
-          // Back to what the page says: give the paragraph back to the page,
-          // which sets it better than this can. Not one that is half of a
-          // split or the whole of a join: its being here is the change.
-          if (!edit.structural && textOfRuns(runs) === paragraph.text) removeEdit(edit.id);
-          else updateEdit(edit.id, { runs });
-        }}
-        onKeyDown={(event) => {
-          // Enter makes two paragraphs of this one. Caught as a key because
-          // plain-text editing reports Enter and Shift+Enter as the same
-          // input; with Shift it is left to be a line break inside the
-          // paragraph, and during a composition it belongs to the input method.
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            const range = window.getSelection()?.getRangeAt(0);
-            if (!range) return;
-            const text = event.currentTarget;
-            const runs = readRuns(text, paragraph);
-            session.splitParagraph(
-              { paragraph, edit },
-              splitRuns(runs, textOffsetOf(text, range.startContainer, range.startOffset))[0],
-              splitRuns(runs, textOffsetOf(text, range.endContainer, range.endOffset))[1],
-            );
-            return;
-          }
-          // Escape gives a paragraph back to the page. One the reader made
-          // has no page to go back to.
-          if (event.key !== "Escape" || !replacesItems(edit)) return;
-          event.preventDefault();
-          removeEdit(edit.id);
-        }}
         {...{ [PARAGRAPH_HOST]: "" }}
       />
       {/* Same type, out of flow: where its baseline falls is where the text's
           does, without putting a measuring element inside editable content. */}
-      <div className="pdf-edit-probe" style={textStyle} aria-hidden>
+      <div className="pdf-edit-probe" style={textStyle} contentEditable={false} aria-hidden>
         <span ref={probeRef} />
       </div>
       </div>
@@ -293,14 +257,13 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
   );
 }
 
-/** Take the caret, and the keystroke, from the page's rendering. `insertText`
- *  and `delete` are the two editing commands every engine still implements,
- *  and both go through the browser's own undo history. */
+/** Take the caret, and the keystroke, from the page's rendering: through the
+ *  browser's own editing commands, so both are in its undo history. */
 function receive(text: HTMLElement, handoff: Handoff): void {
-  text.focus({ preventScroll: true });
+  text.closest<HTMLElement>("[contenteditable]")?.focus({ preventScroll: true });
   selectText(text, handoff.anchor, handoff.focus);
   if (handoff.input?.kind === "insert") {
-    document.execCommand("insertText", false, handoff.input.text);
+    insertPlainText(handoff.input.text);
   } else if (handoff.input?.kind === "delete") {
     document.execCommand("delete");
   }
