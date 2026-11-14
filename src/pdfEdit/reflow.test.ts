@@ -168,6 +168,21 @@ describe("reflowDocument", () => {
     expect(reflow.missing).toEqual([2]);
   });
 
+  it("follows a cascade no further than the horizon, and says where it stopped", () => {
+    const first = page(1, [column(1, "a", 50, 20, 100)]);
+    const second = page(2, [column(2, "a", 50, 20, 100)]);
+    const edit = edited(first, 0, 1, 2);
+    const known = (n: number) => (n === 1 ? applyEdits(first, [edit]) : n === 2 ? second : null);
+    // Page 3 is past the horizon: nobody is asked for it.
+    expect(reflowDocument(known, [1], 9, 2)).toMatchObject({ missing: [], deferred: [3] });
+    // Looked at, it is wanted.
+    expect(reflowDocument(known, [1], 9, 3)).toMatchObject({ missing: [3], deferred: [] });
+  });
+
+  it("always wants the page that was edited, whatever the horizon", () => {
+    expect(reflowDocument(() => null, [7], 9, 2)).toMatchObject({ missing: [7], deferred: [] });
+  });
+
   it("splits an edited paragraph's lines across a page break", () => {
     const first = page(1, [column(1, "a", 50, 20, 100)]);
     const second = page(2, [column(2, "a", 50, 10, 100)]);

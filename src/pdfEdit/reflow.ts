@@ -34,6 +34,10 @@ export interface Reflow {
   /** Pages the cascade reached but could not lay out, because they have not
    *  been analysed. The layout is incomplete until they are. */
   missing: number[];
+  /** Pages a cascade stopped short of because they are past the horizon: not
+   *  analysed, and nobody is looking that far yet. The layout is incomplete
+   *  there too, but nothing is being asked for. */
+  deferred: number[];
 }
 
 /** Rounding slack, in page units. Positions are sums of measured heights. */
@@ -47,14 +51,20 @@ const MAX_APPENDED_PAGES = 500;
  * @param flowOf  The flow of any page, including pages past the document's
  *                end (which are empty). `null` when it is not known yet.
  * @param origins Pages whose content changed, i.e. where cascades start.
+ * @param horizon The last page worth analysing for the sake of a cascade. A
+ *                long document's pages are mostly full, so one added line can
+ *                push a line off every page to the end of a chapter; there is
+ *                no reason to read all of those for a reader looking at one.
  */
 export function reflowDocument(
   flowOf: (page: number) => PageFlow | null,
   origins: number[],
   documentPages: number,
+  horizon = Infinity,
 ): Reflow {
   const plans = new Map<number, PagePlan>();
   const missing: number[] = [];
+  const deferred: number[] = [];
   let lastPage = documentPages;
 
   for (const origin of [...new Set(origins)].sort((a, b) => a - b)) {
@@ -66,7 +76,9 @@ export function reflowDocument(
       }
       const flow = flowOf(page);
       if (!flow) {
-        missing.push(page);
+        // The page that was edited is always wanted; what it pushes onto
+        // later pages is wanted as far as the horizon.
+        (page === origin || page <= horizon ? missing : deferred).push(page);
         break;
       }
       const { placements, overflow } = layoutPage(flow, carried);
@@ -76,7 +88,7 @@ export function reflowDocument(
     }
   }
 
-  return { plans, lastPage, missing };
+  return { plans, lastPage, missing, deferred };
 }
 
 /** One page: what stays on it, and what leaves for the next. */

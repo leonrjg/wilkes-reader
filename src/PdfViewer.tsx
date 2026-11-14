@@ -130,8 +130,10 @@ export interface PdfReaderHandle extends FindableReaderHandle, ZoomableReaderHan
   /** The document as edited, for the host to write to a file: for each page
    *  that changed, which areas of which source pages are drawn where and what
    *  text is set among them. Null when not editing or nothing has changed.
-   *  Throws when some edited text has no whole font to be saved in. */
-  exportEdits: () => PdfEditExport | null;
+   *  It lays out every page the edits reach first, so in a long document it
+   *  can take a while. Rejects when some edited text has no whole font to be
+   *  saved in. */
+  exportEdits: () => Promise<PdfEditExport | null>;
   /** Give every changed paragraph back to the page, and forget the changes. */
   discardEdits: () => void;
 }
@@ -1042,7 +1044,7 @@ export default function PdfViewer({
       getCurrentPage: () => currentPage,
       getPageCount: () => numPages,
       getDocument: () => pdf ?? null,
-      exportEdits: () => editSession?.exportEdits() ?? null,
+      exportEdits: async () => (await editSession?.exportEdits()) ?? null,
       discardEdits: () => editSession?.discardEdits(),
       getZoom: () => zoom,
       setZoom: (next) =>

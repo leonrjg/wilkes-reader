@@ -108,9 +108,13 @@ export interface PdfEditSession {
    *  mounted. Returns the function that withdraws the offer. */
   registerTypesetter: (editId: string, typeset: () => TypesetText[]) => () => void;
   /** The document as edited, for a host to write to a file. Null when nothing
-   *  has been changed. Throws when some edited text cannot be saved as it is
-   *  shown -- its font has no whole font behind it. */
-  exportEdits: () => PdfEditExport | null;
+   *  has been changed. It first lays out every page the edits reach, however
+   *  far past the screen that is, so it takes as long as that takes. Rejects
+   *  when some edited text cannot be saved as it is shown -- its font has no
+   *  whole font behind it -- or a page cannot be read. */
+  exportEdits: () => Promise<PdfEditExport | null>;
+  /** Say how far the reader is looking, so cascades are followed that far. */
+  lookAhead: (page: number) => void;
   /** Give every changed paragraph back to the page. */
   discardEdits: () => void;
   beginEdit: (paragraph: Paragraph, handoff: Omit<Handoff, "editId">) => void;
@@ -123,6 +127,8 @@ export interface PdfEditSession {
 const DEFAULT_FONT: FontInfo = { name: "", generic: "serif", bold: false, italic: false };
 
 const NO_BACKDROPS: Backdrop[] = [];
+/** How many pages past the one a cascade is waiting on are analysed with it. */
+const ANALYSE_AHEAD = 2;
 
 /** What names a paragraph across re-analysis: the first item it occupies. */
 export const paragraphKey = (paragraph: Paragraph) => paragraph.itemIds[0];
@@ -145,6 +151,14 @@ export function usePdfEditSession(
   const [edits, setEdits] = useState<readonly ParagraphEdit[]>([]);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const requested = useRef(new Set<number>());
+  // How far past the edits their consequences are followed. It only grows:
+  // what has been laid out stays laid out.
+  const [horizon, setHorizon] = useState(0);
+  const lookAhead = useCallback((page: number) => {
+    setHorizon((current) => (page > current ? page : current));
+  }, []);
+  /** Whoever is waiting for the whole document to be laid out. */
+  const waiting = useRef<Array<{ resolve: () => void; reject: (error: unknown) => void }>>([]);
   const typesetters = useRef(new Map<string, () => TypesetText[]>());
   const nextEditId = useRef(1);
   const documentPages = pageSizes.length;
@@ -158,6 +172,7 @@ export function usePdfEditSession(
     requested.current = new Set();
     setAnalyses(new Map());
     setHandoff(null);
+    setHorizon(0);
     const draft = pdf ? (store?.read(documentKey) ?? null) : null;
     const kept = usableEdits(draft);
     const ids = kept.map(() => `edit-${nextEditId.current++}`);
@@ -210,6 +225,8 @@ export function usePdfEditSession(
           // Left out of `requested` so a later look at the page tries again.
           requested.current.delete(page);
           console.error(`PDF edit: analysing page ${page} failed:`, error);
+          // A layout that cannot be finished must not leave a save waiting.
+          for (const waiter of waiting.current.splice(0)) waiter.reject(error);
         },
       );
     },
@@ -312,13 +329,29 @@ export function usePdfEditSession(
         },
         edits.map((edit) => edit.paragraph.page),
         documentPages,
+        horizon,
       ),
-    [model, edits, documentPages],
+    [model, edits, documentPages, horizon],
   );
 
   useEffect(() => {
-    reflow.missing.forEach(requestAnalysis);
-  }, [reflow, requestAnalysis]);
+    for (const page of reflow.missing) {
+      // A cascade stops at the first page it cannot lay out, and will stop at
+      // the one after it next. The next few are asked for with it.
+      for (let ahead = page; ahead <= Math.min(page + ANALYSE_AHEAD, horizon, documentPages); ahead++) {
+        requestAnalysis(ahead);
+      }
+      requestAnalysis(page);
+    }
+    if (reflow.missing.length === 0 && reflow.deferred.length === 0) {
+      for (const waiter of waiting.current.splice(0)) waiter.resolve();
+    }
+  }, [reflow, requestAnalysis, horizon, documentPages]);
+
+  // What a save reads once the layout is whole: by then the render that asked
+  // for it is long gone, and so is everything it closed over.
+  const latest = useRef({ reflow, model, edits, horizon });
+  latest.current = { reflow, model, edits, horizon };
 
   // An edit names the paragraph it replaced. One taken up from a draft is only
   // as good as that paragraph still being on the page: a file changed on disk
@@ -572,10 +605,27 @@ export function usePdfEditSession(
       registerTypesetter,
       discardEdits,
 
-      exportEdits: () => {
-        if (edits.length === 0) return null;
+      lookAhead,
+
+      exportEdits: async () => {
+        if (latest.current.edits.length === 0) return null;
+        const whole = () =>
+          latest.current.horizon === Infinity &&
+          latest.current.reflow.missing.length === 0 &&
+          latest.current.reflow.deferred.length === 0;
+        if (!whole()) {
+          await new Promise<void>((resolve, reject) => {
+            waiting.current.push({ resolve, reject });
+            setHorizon(Infinity);
+          });
+        }
+        const { reflow: complete, model: read, edits: current } = latest.current;
         const text = [...typesetters.current.values()].flatMap((typeset) => typeset());
-        return buildExport(reflow.plans, model.flowOf, model.follows, text, backdrops);
+        const standing = new Map<number, Backdrop[]>();
+        for (const backdrop of current.flatMap((edit) => editBackdrops(edit, complete.plans))) {
+          standing.set(backdrop.page, [...(standing.get(backdrop.page) ?? []), backdrop]);
+        }
+        return buildExport(complete.plans, read.flowOf, read.follows, text, standing);
       },
 
       beginEdit,
@@ -599,5 +649,6 @@ export function usePdfEditSession(
     liveFont,
     registerTypesetter,
     discardEdits,
+    lookAhead,
   ]);
 }
