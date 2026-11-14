@@ -79,47 +79,77 @@ Links are destinations, never navigations. `#fragment` scrolls within the
 document, a relative link is handed to the host as a path, and anything else
 goes to `openExternal`.
 
-### Editing a PDF in place (prototype)
+### Editing a PDF in place
 
-`<PdfViewer editing />` lets the reader click a paragraph and type into it. The
-lines after it move to make room: down the page, into the next column, and on
-to the next page when a page fills, appending pages past the document's end if
-it comes to that. **Nothing is written to the file** — this changes how the
-pages are drawn, and only that. The text layer, links, decorations and find
-describe the pages as the file has them, so they are not shown while editing.
+`<PdfViewer editing />` makes a PDF's text something to type in. Nothing on the
+page changes until the reader types: every paragraph has invisible, editable
+text laid over the page's own rendering, so a click puts a caret between two
+letters and an arrow key carries it from one paragraph into the next. The first
+keystroke in a paragraph takes that paragraph — and only that one — from the
+page and sets it as live text, in the runs of type it was in. What follows it
+moves to make room: down the page, into the next column, on to the next page,
+and onto pages appended past the document's end. Enter starts a new paragraph;
+Backspace or Delete at a paragraph's edge joins it to its neighbour.
 
-A PDF page is a picture with no paragraphs in it, so the editor reads one into
-a model that can be laid out again. It lives in `src/pdfEdit/`, in layers that
-each know about one thing:
+**The file is never written by the reader.** An edit is a statement about how
+pages are drawn. A host that wants a file asks for the result and writes it:
+
+```ts
+const edits = await ref.current.exportEdits();   // null when nothing changed
+if (edits) await myBackend.writePdf(sourcePath, edits);
+```
+
+`exportEdits()` returns, for each page that changed, which areas of which
+source pages are drawn where (`strips`) and which runs of text sit on which
+baselines in which font (`text`). The reader broke the lines and laid out the
+pages, so whoever writes the file computes nothing: it copies areas and sets
+text where it is told. `discardEdits()` gives everything back to the page.
+
+Three things come from the host, all optional:
+
+| On `ReaderHostProvider` / `PdfViewer` | Without it |
+| --- | --- |
+| `resolvePdfFont(font)` — a whole, installed font standing in for one the document names. A PDF embeds *subsets* of its fonts, so typed text needs a whole one, and the host saves with the same file | Edited text is set in the embedded faces as far as they go, and `exportEdits()` rejects |
+| `pdfEdits` — a store for unsaved edits, keyed like `positions` | Edits last as long as the viewer showing them |
+| `textSubstitutions` — the areas the host's reading knows are formulas or tables | Nothing is locked: a formula can be cut between two of its rows, and offered as prose |
+
+The text layer, links, decorations and find describe the pages as the file has
+them, so they are not shown while editing.
+
+It lives in `src/pdfEdit/`, in layers that each know about one thing:
 
 | Module | Knows about |
 | --- | --- |
 | `flow.ts` | The model: a page is regions, a region is columns, a column is items |
 | `reflow.ts` | Laying that model out again. Pure; no pdf.js, canvas or DOM |
 | `inkGrid.ts`, `pageLayout.ts` | Reading a page's lines and columns off its raster |
-| `documentFrame.ts` | What only several pages can say: running heads, how far down a page goes |
-| `paragraphs.ts` | Which lines are one paragraph, and the text and type it was set in |
-| `edits.ts` | Replacing a paragraph's lines in the flow with live text |
+| `documentFrame.ts` | What only several pages can say: running heads, how far down a page goes, and what the host says is locked |
+| `paragraphs.ts` | Which lines are one paragraph, and the text and runs of type it was set in |
+| `edits.ts` | An edit: replacing a paragraph's lines in the flow, following another edit, what it stood on |
+| `editExport.ts`, `typeset.ts` | The edited document as areas and text, read back off the screen |
+| `editStore.ts`, `hostFonts.ts` | What crosses to the host: unsaved edits, and fonts |
 | `pdfPageSource.ts` | The only module that touches pdf.js |
 | `usePdfEditSession.ts` | The state: what is known about the pages, and what was changed |
-| `PdfEditPage.tsx`, `PdfEditBlocks.tsx` | Drawing: pages recomposed from strips, and the editable text over them |
+| `PdfEditPage.tsx` | The paper: pages recomposed from strips |
+| `PdfEditLayer.tsx`, `PageParagraph.tsx`, `LiveParagraph.tsx` | The text: untouched paragraphs as a caret over the page, changed ones as live text |
 
-What it does not do yet, on purpose or otherwise:
+What it does not do:
 
-- **Save.** There is no way to write an edit back to a PDF.
 - **Refill a page.** Content moves forward and never back: deleting text leaves
   room at the foot of its page, because nothing in a PDF says whether the break
   after it was forced.
 - **Split a paragraph between columns.** An edited paragraph beside another
   column moves as one block; across a page break in a single column it splits
   line by line.
-- **Match the page's type exactly.** The text is set in the page's embedded
-  font, which is usually a subset: a character it lacks falls back to a generic
-  face. Hyphenation and kerning are the browser's, so a paragraph can wrap to a
-  different number of lines the moment it is taken over.
-- **Understand structure.** Paragraphs, columns and running heads are found by
-  geometry. A formula can be cut between two of its rows, a table can be taken
-  for columns, and a scanned page is one unbreakable block.
+- **Select across paragraphs.** Each paragraph is its own editable element: a
+  caret crosses from one to the next, a selection does not.
+- **Join across a column, a page or a figure.** Two paragraphs become one only
+  where the page set one directly under the other.
+- **Change type.** A paragraph keeps the styles it had; there is no way to make
+  a word bold that was not.
+- **Find structure the host did not name.** Paragraphs, columns and running
+  heads are found by geometry. A table can be taken for columns, and a scanned
+  page is one unbreakable block.
 
 ### Installing
 
