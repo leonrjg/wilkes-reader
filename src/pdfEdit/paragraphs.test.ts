@@ -14,7 +14,7 @@ function line(index: number, top: number, text: string, left = LEFT, right = RIG
     trailing: 0,
     content: { kind: "slice", page: 1, rect: { x: LEFT, y: top, width: RIGHT - LEFT, height: 8 } },
   };
-  const run: TextRun = { text, x: left, width: right - left, baseline: top + 7, fontSize: 10, fontName: "f1" };
+  const run: TextRun = { text, x: left, width: right - left, baseline: top + 7, fontSize: 10, fontName: "f1", color: "black" };
   return { item, run };
 }
 
@@ -52,6 +52,12 @@ describe("paragraphsOf", () => {
       align: "justify",
       splittable: true,
     });
+    // Where each line went in the joined text: the first lost its hyphen.
+    expect(paragraph.lines.map(({ itemId, start, kept, baselineOffset }) => [itemId, start, kept, baselineOffset])).toEqual([
+      ["1:0:0:0", 0, 27, 7],
+      ["1:0:0:1", 27, 26, 7],
+      ["1:0:0:2", 54, 10, 7],
+    ]);
   });
 
   it("starts a new paragraph after a short line, a wide gap, or at an indent", () => {

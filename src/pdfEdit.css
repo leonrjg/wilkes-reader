@@ -1,16 +1,42 @@
 /* Inline PDF editing: a paragraph taken over from the page is live text laid
  * over the canvas, in a layer that spans the whole scrolled document. */
 
-/* The paragraph under the pointer, before it is taken over. */
-.pdf-edit-target {
+/* Sized to nothing and placed at the document's origin: everything in it is
+   positioned against the scrolled content, and the layer itself must not take
+   a click meant for a page. */
+.pdf-edit-layer {
   position: absolute;
-  margin: -2px -3px;
-  padding: 2px 3px;
-  box-sizing: content-box;
-  border-radius: 2px;
-  outline: 1px dashed rgba(59, 130, 246, 0.6);
-  background-color: rgba(59, 130, 246, 0.06);
-  pointer-events: none;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 2;
+}
+
+/* An untouched paragraph: the page draws it, and this lays the same text over
+   each line, invisible, so there is a caret to put and words to select. */
+.pdf-edit-page-text {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  outline: none;
+  color: transparent;
+  font-synthesis: none;
+}
+
+/* One line, as wide as the page set it. Justifying a single line to that
+   width spreads its words to where the page's are, so the caret lands between
+   the letters it appears to be between. */
+.pdf-edit-page-text > div {
+  position: absolute;
+  white-space: nowrap;
+  text-align: justify;
+  text-align-last: justify;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* `flow-root` makes this the formatting context its floats belong to: they
@@ -21,7 +47,6 @@
   position: absolute;
   display: flow-root;
   pointer-events: none;
-  z-index: 2;
 }
 
 .pdf-edit-float {
@@ -64,17 +89,9 @@
   vertical-align: baseline;
 }
 
-.pdf-edit-outline {
-  position: absolute;
-  margin: -2px -3px;
-  padding: 2px 3px;
-  box-sizing: content-box;
-  border-radius: 2px;
-  outline: 1px solid rgba(59, 130, 246, 0.7);
-  pointer-events: none;
-}
-
-/* Live text is darkened with the page it sits on. */
+/* Live text is darkened with the page it sits on, and so is the caret over a
+   paragraph the page still draws. */
+.pdf-dark-mode .pdf-edit-page-text,
 .pdf-dark-mode .pdf-edit-text {
   filter: var(
     --pdf-dark-filter,

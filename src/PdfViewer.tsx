@@ -48,7 +48,7 @@ import type { TextSubstitution } from "./pdfTextSubstitution.js";
 import type { PdfReaderSlots } from "./slots.js";
 import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.js";
 import PdfEditPage from "./pdfEdit/PdfEditPage.js";
-import PdfEditBlocks, { type PageGeometry } from "./pdfEdit/PdfEditBlocks.js";
+import PdfEditLayer, { type PageGeometry } from "./pdfEdit/PdfEditLayer.js";
 import { usePdfEditSession } from "./pdfEdit/usePdfEditSession.js";
 
 export interface PdfViewerProps {
@@ -1322,7 +1322,13 @@ export default function PdfViewer({
                 </div>
               );
             })}
-            {editSession && <PdfEditBlocks session={editSession} geometryOf={pageGeometry} />}
+            {editSession && (
+              <PdfEditLayer
+                session={editSession}
+                pages={virtualItems.map((vItem) => vItem.index + 1)}
+                geometryOf={pageGeometry}
+              />
+            )}
           </div>
         </div>
       </div>

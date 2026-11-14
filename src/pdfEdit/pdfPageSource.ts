@@ -72,19 +72,53 @@ export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Pr
     const transform = Util.transform(toPage, item.transform);
     // Text set at an angle is not a line of a paragraph; leave it to the page.
     if (Math.abs(transform[1]) > 0.01 * Math.abs(transform[0])) continue;
+    const fontSize = Math.hypot(transform[2], transform[3]);
     runs.push({
       text: item.str,
       x: transform[4],
       width: item.width,
       baseline: transform[5],
-      fontSize: Math.hypot(transform[2], transform[3]),
+      fontSize,
       fontName: item.fontName,
+      color: inkColour(image, {
+        x: transform[4] * ANALYSIS_SCALE,
+        y: (transform[5] - fontSize * 0.75) * ANALYSIS_SCALE,
+        width: item.width * ANALYSIS_SCALE,
+        height: fontSize * 0.95 * ANALYSIS_SCALE,
+      }),
     });
     if (!fonts.has(item.fontName)) {
       fonts.set(item.fontName, fontInfo(page, item.fontName, content.styles[item.fontName]?.fontFamily));
     }
   }
   return { layout, runs, fonts };
+}
+
+/** The colour a run is set in: the darkest thing drawn where it sits. Read
+ *  from the raster because the text layer does not carry fill colours. */
+function inkColour(
+  image: ImageData,
+  area: { x: number; y: number; width: number; height: number },
+): string {
+  const left = Math.max(0, Math.floor(area.x));
+  const top = Math.max(0, Math.floor(area.y));
+  const right = Math.min(image.width, Math.ceil(area.x + area.width));
+  const bottom = Math.min(image.height, Math.ceil(area.y + area.height));
+  let darkest = -1;
+  let luminance = Infinity;
+  for (let y = top; y < bottom; y++) {
+    for (let x = left; x < right; x++) {
+      const offset = (y * image.width + x) * 4;
+      const value =
+        image.data[offset] * 0.299 + image.data[offset + 1] * 0.587 + image.data[offset + 2] * 0.114;
+      if (value < luminance) {
+        luminance = value;
+        darkest = offset;
+      }
+    }
+  }
+  if (darkest < 0) return "black";
+  return `rgb(${image.data[darkest]}, ${image.data[darkest + 1]}, ${image.data[darkest + 2]})`;
 }
 
 /** pdf.js registers an embedded font under a generated name and with no weight

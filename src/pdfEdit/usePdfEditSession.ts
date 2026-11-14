@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BoundingBox } from "../documentCoordinates.js";
 import type { PDFDocumentProxy } from "../pdfjs.js";
 import { blankPageFlow, buildPageFlow, resolveDocumentFrame } from "./documentFrame.js";
 import { applyEdits, createEdit, editFragments, type EditFragment, type ParagraphEdit } from "./edits.js";
@@ -28,17 +27,25 @@ export interface PageView {
   placements: Placement[] | null;
 }
 
-/** A paragraph under the pointer, and where it is on the page being shown. */
-export interface ParagraphHit {
-  paragraph: Paragraph;
-  box: BoundingBox;
+/** What to do in a paragraph the moment it becomes live text: the keystroke
+ *  that made it one has not happened yet, and has to happen there. */
+export type PendingInput = { kind: "insert"; text: string } | { kind: "delete" };
+
+/** A paragraph handed over from the page's rendering to live text. The caret
+ *  was over the page; it has to reappear at the same place in the text. */
+export interface Handoff {
+  editId: string;
+  /** The selection to restore, as offsets into the paragraph's text. */
+  anchor: number;
+  focus: number;
+  input: PendingInput | null;
 }
 
-/** Where to put the caret in an edit that was just opened by a click. */
-export interface FocusRequest {
-  editId: string;
-  clientX: number;
-  clientY: number;
+/** Where an item of the page is now. */
+export interface Located {
+  page: number;
+  x: number;
+  y: number;
 }
 
 export interface PdfEditSession {
@@ -49,20 +56,23 @@ export interface PdfEditSession {
   edits: readonly ParagraphEdit[];
   requestAnalysis: (page: number) => void;
   pageView: (page: number) => PageView;
-  paragraphAt: (page: number, x: number, y: number) => ParagraphHit | null;
+  /** A page's own paragraphs in reading order, wherever they are drawn now. */
+  paragraphsOf: (page: number) => Paragraph[];
+  editOf: (paragraph: Paragraph) => ParagraphEdit | null;
+  locate: (itemId: string) => Located | null;
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
-  fontOf: (edit: ParagraphEdit) => FontInfo;
-  beginEdit: (paragraph: Paragraph, color: string, at: { clientX: number; clientY: number }) => void;
+  fontOf: (paragraph: Paragraph) => FontInfo;
+  beginEdit: (paragraph: Paragraph, handoff: Omit<Handoff, "editId">) => void;
   updateEdit: (id: string, patch: Partial<Pick<ParagraphEdit, "text" | "lineCount" | "ascent">>) => void;
   removeEdit: (id: string) => void;
-  focusRequest: FocusRequest | null;
-  clearFocusRequest: () => void;
+  handoff: Handoff | null;
+  clearHandoff: () => void;
 }
 
 const DEFAULT_FONT: FontInfo = { fallback: "serif", bold: false, italic: false };
-/** How far outside a strip a click still counts as on it, in page units: the
- *  space between two lines belongs to the paragraph they are in. */
-const HIT_SLOP = 2;
+
+/** What names a paragraph across re-analysis: the first item it occupies. */
+export const paragraphKey = (paragraph: Paragraph) => paragraph.itemIds[0];
 
 export function usePdfEditSession(
   pdf: PDFDocumentProxy | null,
@@ -71,7 +81,7 @@ export function usePdfEditSession(
 ): PdfEditSession | null {
   const [analyses, setAnalyses] = useState<ReadonlyMap<number, PageAnalysis>>(() => new Map());
   const [edits, setEdits] = useState<readonly ParagraphEdit[]>([]);
-  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
+  const [handoff, setHandoff] = useState<Handoff | null>(null);
   const requested = useRef(new Set<number>());
   const nextEditId = useRef(1);
   const documentPages = pageSizes.length;
@@ -83,7 +93,7 @@ export function usePdfEditSession(
     requested.current = new Set();
     setAnalyses(new Map());
     setEdits([]);
-    setFocusRequest(null);
+    setHandoff(null);
   }, [pdf]);
 
   // Rasters are megabytes each and only edit mode composes from them.
@@ -117,7 +127,7 @@ export function usePdfEditSession(
       new Map([...analyses].map(([page, analysis]) => [page, analysis.layout])),
     );
     const flows = new Map<number, PageFlow>();
-    const paragraphs = new Map<number, Map<string, Paragraph>>();
+    const paragraphs = new Map<number, Paragraph[]>();
     const identity = new Map<number, Placement[]>();
 
     const flowOf = (page: number): PageFlow | null => {
@@ -137,20 +147,15 @@ export function usePdfEditSession(
       return flow;
     };
 
-    const paragraphOf = (page: number, itemId: string): Paragraph | null => {
-      let byItem = paragraphs.get(page);
-      if (!byItem) {
-        byItem = new Map();
+    const paragraphsOn = (page: number): Paragraph[] => {
+      let list = paragraphs.get(page);
+      if (!list) {
         const flow = flowOf(page);
         const analysis = analyses.get(page);
-        if (flow && analysis) {
-          for (const paragraph of paragraphsOf(flow, analysis.runs)) {
-            for (const id of paragraph.itemIds) byItem.set(id, paragraph);
-          }
-        }
-        paragraphs.set(page, byItem);
+        list = flow && analysis ? paragraphsOf(flow, analysis.runs) : [];
+        paragraphs.set(page, list);
       }
-      return byItem.get(itemId) ?? null;
+      return list;
     };
 
     /** Where a page no edit reaches has its items: where the file drew them. */
@@ -164,7 +169,7 @@ export function usePdfEditSession(
       return placements;
     };
 
-    return { flowOf, paragraphOf, identityPlacements };
+    return { flowOf, paragraphsOn, identityPlacements };
   }, [analyses, pageSizes, documentPages]);
 
   const reflow = useMemo(
@@ -187,10 +192,10 @@ export function usePdfEditSession(
   // Stable, because the editable blocks hold them across renders: one that
   // changed identity with every keystroke would re-run the effects that write
   // and read back the text under the caret.
-  const beginEdit = useCallback<PdfEditSession["beginEdit"]>((paragraph, color, at) => {
+  const beginEdit = useCallback<PdfEditSession["beginEdit"]>((paragraph, handoff) => {
     const id = `edit-${nextEditId.current++}`;
-    setEdits((current) => [...current, createEdit(id, paragraph, color)]);
-    setFocusRequest({ editId: id, ...at });
+    setEdits((current) => [...current, createEdit(id, paragraph)]);
+    setHandoff({ editId: id, ...handoff });
   }, []);
   const updateEdit = useCallback<PdfEditSession["updateEdit"]>((id, patch) => {
     setEdits((current) => {
@@ -206,14 +211,25 @@ export function usePdfEditSession(
   const removeEdit = useCallback<PdfEditSession["removeEdit"]>((id) => {
     setEdits((current) => current.filter((edit) => edit.id !== id));
   }, []);
-  const clearFocusRequest = useCallback(() => setFocusRequest(null), []);
+  const clearHandoff = useCallback(() => setHandoff(null), []);
 
   return useMemo(() => {
     if (!pdf || !rasters) return null;
-    const editedItems = new Set(edits.flatMap((edit) => edit.paragraph.itemIds));
+    const editByParagraph = new Map(edits.map((edit) => [paragraphKey(edit.paragraph), edit]));
 
-    const placementsOf = (page: number): Placement[] =>
-      reflow.plans.get(page)?.placements ?? model.identityPlacements(page);
+    // Where every item of the analysed pages is now. Built on first use: most
+    // renders ask about a handful of paragraphs, and many ask about none.
+    let located: Map<string, Located> | null = null;
+    const locate = (itemId: string): Located | null => {
+      if (!located) {
+        located = new Map();
+        for (const page of new Set([...analyses.keys(), ...reflow.plans.keys()])) {
+          const placements = reflow.plans.get(page)?.placements ?? model.identityPlacements(page);
+          for (const { item, x, y } of placements) located.set(item.id, { page, x, y });
+        }
+      }
+      return located.get(itemId) ?? null;
+    };
 
     return {
       pageCount: reflow.lastPage,
@@ -221,39 +237,21 @@ export function usePdfEditSession(
       rasters,
       edits,
       requestAnalysis,
-      focusRequest,
-      clearFocusRequest,
+      handoff,
+      clearHandoff,
 
       pageView: (page) => ({
         flow: model.flowOf(page),
         placements: reflow.plans.get(page)?.placements ?? null,
       }),
 
-      paragraphAt: (page, x, y) => {
-        const placements = placementsOf(page);
-        const under = placements.find(
-          ({ item, x: left, y: top, width }) =>
-            item.content.kind === "slice" &&
-            x >= left && x <= left + width &&
-            y >= top - HIT_SLOP && y <= top + item.height + HIT_SLOP,
-        );
-        if (!under || under.item.content.kind !== "slice" || editedItems.has(under.item.id)) {
-          return null;
-        }
-        const paragraph = model.paragraphOf(under.item.content.page, under.item.id);
-        if (!paragraph) return null;
-        const mine = placements.filter(({ item }) => paragraph.itemIds.includes(item.id));
-        const top = Math.min(...mine.map((placement) => placement.y));
-        const bottom = Math.max(...mine.map((placement) => placement.y + placement.item.height));
-        return {
-          paragraph,
-          box: { x: under.x + paragraph.inset, y: top, width: paragraph.width, height: bottom - top },
-        };
-      },
+      paragraphsOf: model.paragraphsOn,
+      editOf: (paragraph) => editByParagraph.get(paragraphKey(paragraph)) ?? null,
+      locate,
 
       fragmentsOf: (edit) => editFragments(edit, reflow.plans),
-      fontOf: (edit) =>
-        analyses.get(edit.paragraph.page)?.fonts.get(edit.paragraph.fontName) ?? DEFAULT_FONT,
+      fontOf: (paragraph) =>
+        analyses.get(paragraph.page)?.fonts.get(paragraph.fontName) ?? DEFAULT_FONT,
 
       beginEdit,
       updateEdit,
@@ -268,8 +266,8 @@ export function usePdfEditSession(
     analyses,
     documentPages,
     requestAnalysis,
-    focusRequest,
-    clearFocusRequest,
+    handoff,
+    clearHandoff,
     beginEdit,
     updateEdit,
     removeEdit,

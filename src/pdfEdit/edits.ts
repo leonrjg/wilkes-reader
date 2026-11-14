@@ -22,19 +22,21 @@ export interface ParagraphEdit {
   /** A line box's top to its baseline, as the browser sets this type. Null
    *  until it has been measured, and estimated meanwhile. */
   ascent: number | null;
-  /** The colour the page drew this text in, as CSS. */
-  color: string;
 }
 
-export function createEdit(id: string, paragraph: Paragraph, color: string): ParagraphEdit {
-  return { id, paragraph, text: paragraph.text, lineCount: paragraph.lineCount, ascent: null, color };
+export function createEdit(id: string, paragraph: Paragraph): ParagraphEdit {
+  return { id, paragraph, text: paragraph.text, lineCount: paragraph.lineCount, ascent: null };
 }
 
-/** A line box's top to its baseline, before the browser has said. */
-function ascentOf(edit: ParagraphEdit): number {
-  if (edit.ascent !== null) return edit.ascent;
-  const { lineHeight, fontSize } = edit.paragraph;
+/** A line box's top to its baseline for a paragraph's type, as a typical font
+ *  has it. Good enough to put a caret over a line; an edit replaces it with
+ *  what the browser measured. */
+export function estimatedAscent({ lineHeight, fontSize }: Paragraph): number {
   return (lineHeight - fontSize * 1.15) / 2 + fontSize * 0.9;
+}
+
+function ascentOf(edit: ParagraphEdit): number {
+  return edit.ascent ?? estimatedAscent(edit.paragraph);
 }
 
 /** The page's flow with each edited paragraph's strips replaced by its lines. */

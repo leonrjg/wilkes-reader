@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { PARAGRAPH_HOST } from "./caretTravel.js";
+import { lineRects, selectText } from "./editableText.js";
 import type { EditFragment, ParagraphEdit } from "./edits.js";
-import type { PdfEditSession } from "./usePdfEditSession.js";
+import type { PageGeometry } from "./PdfEditLayer.js";
+import { lineHeightPx, paragraphTextStyle } from "./paragraphStyle.js";
+import type { Handoff, PdfEditSession } from "./usePdfEditSession.js";
 
 /**
- * The edited paragraphs, as live text over the pages.
+ * A paragraph the reader has changed, as live text over the pages.
  *
- * Each is one `contenteditable` for the whole paragraph, however many pages it
+ * It is one `contenteditable` for the whole paragraph, however many pages it
  * crosses, so the caret, selection, undo and input methods are the browser's
  * and behave as they do anywhere else. The browser also does the line
  * breaking: the reflow engine is told how many lines the text wrapped to and
@@ -16,32 +20,12 @@ import type { PdfEditSession } from "./usePdfEditSession.js";
  * float as wide as the block, sized to exactly that distance, which no line
  * box fits beside. Floats can move later lines down and sideways but never
  * back up, which is why a paragraph beside another column is not split.
- *
- * These live in one layer over the whole document rather than inside a page,
- * because the pages are virtualized and a paragraph can belong to two of them.
  */
 
-/** Where a page is in the scrolled content, and how large it is drawn. */
-export interface PageGeometry {
-  /** CSS px from the content's top to the page's top. */
-  top: number;
-  /** CSS px per page unit. */
-  scale: number;
-}
-
-interface PdfEditBlocksProps {
+interface LiveParagraphProps {
   session: PdfEditSession;
+  edit: ParagraphEdit;
   geometryOf: (page: number) => PageGeometry | null;
-}
-
-export default function PdfEditBlocks({ session, geometryOf }: PdfEditBlocksProps) {
-  return (
-    <>
-      {session.edits.map((edit) => (
-        <PdfEditBlock key={edit.id} session={session} edit={edit} geometryOf={geometryOf} />
-      ))}
-    </>
-  );
 }
 
 /** A fragment of a paragraph, in CSS px within the scrolled content. */
@@ -51,10 +35,6 @@ interface Box {
   lines: number;
 }
 
-/** Layout engines keep lengths in 64ths of a pixel. A line height that is not
- *  a whole number of them is rounded per line, and forty lines of rounding is
- *  enough to put the last line of a page on the wrong side of a float. */
-const snap = (pixels: number) => Math.round(pixels * 64) / 64;
 /** Extra width on the text box, so a line the page set full is not wrapped by
  *  a fraction of a pixel of rounding. */
 const WIDTH_SLACK_PX = 1;
@@ -62,24 +42,14 @@ const WIDTH_SLACK_PX = 1;
  *  under a line height keeps a fragment's last line clear of the float below. */
 const FLOAT_SLACK_PX = 0.5;
 
-function PdfEditBlock({
-  session,
-  edit,
-  geometryOf,
-}: {
-  session: PdfEditSession;
-  edit: ParagraphEdit;
-  geometryOf: (page: number) => PageGeometry | null;
-}) {
+export default function LiveParagraph({ session, edit, geometryOf }: LiveParagraphProps) {
   const textRef = useRef<HTMLDivElement>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
-  const [focused, setFocused] = useState(false);
   const { paragraph } = edit;
-  const { updateEdit, removeEdit, focusRequest, clearFocusRequest } = session;
+  const { updateEdit, removeEdit, handoff, clearHandoff } = session;
 
-  const home = geometryOf(paragraph.page);
-  const scale = home?.scale ?? 1;
-  const lineHeight = snap(paragraph.lineHeight * scale);
+  const scale = geometryOf(paragraph.page)?.scale ?? 1;
+  const lineHeight = lineHeightPx(paragraph, scale);
   const textWidth = paragraph.width * scale + WIDTH_SLACK_PX;
   const boxes = fragmentBoxes(session.fragmentsOf(edit), geometryOf);
   // A cascade waiting on a page's analysis has not placed this paragraph yet.
@@ -88,14 +58,9 @@ function PdfEditBlock({
   if (boxes.length > 0) lastBoxes.current = boxes;
   const shown = lastBoxes.current;
 
-  const font = session.fontOf(edit);
-  const textStyle: React.CSSProperties = {
-    fontFamily: `"${paragraph.fontName}", ${font.fallback}`,
-    fontSize: paragraph.fontSize * scale,
-    fontWeight: font.bold ? "bold" : "normal",
-    fontStyle: font.italic ? "italic" : "normal",
-    lineHeight: `${lineHeight}px`,
-    color: edit.color,
+  const textStyle = {
+    ...paragraphTextStyle(paragraph, session.fontOf(paragraph), scale),
+    color: paragraph.color,
   };
 
   /** Report what the browser made of the text: how many lines, and where in a
@@ -104,13 +69,13 @@ function PdfEditBlock({
     const text = textRef.current;
     const probe = probeRef.current;
     if (!text || !probe?.parentElement) return;
-    const lineCount = countLines(text, lineHeight);
+    const lineCount = Math.max(1, lineRects(text).length);
     const ascent =
       (probe.getBoundingClientRect().top - probe.parentElement.getBoundingClientRect().top) / scale;
     const changed =
       lineCount !== edit.lineCount || edit.ascent === null || Math.abs(ascent - edit.ascent) > 0.01;
     if (changed) updateEdit(edit.id, { lineCount, ascent });
-  }, [edit.id, edit.lineCount, edit.ascent, lineHeight, scale, updateEdit]);
+  }, [edit.id, edit.lineCount, edit.ascent, scale, updateEdit]);
 
   // The text is the browser's while it is mounted: React writes it once and
   // reads it back, and never re-renders it under the caret.
@@ -122,6 +87,15 @@ function PdfEditBlock({
     // `edit.text` is deliberately not a dependency: it is written once, at mount.
   }, [edit.id, updateEdit]);
 
+  // Taken over from the page mid-keystroke: put the caret back where it was
+  // over the page's rendering, then let the keystroke happen.
+  useLayoutEffect(() => {
+    const text = textRef.current;
+    if (!text || handoff?.editId !== edit.id) return;
+    receive(text, handoff);
+    clearHandoff();
+  }, [handoff, edit.id, clearHandoff]);
+
   // Before paint, so the lines around a paragraph never show at the position
   // its previous height put them.
   useLayoutEffect(measure, [measure, textWidth, paragraph.fontSize]);
@@ -132,14 +106,6 @@ function PdfEditBlock({
     document.fonts.addEventListener("loadingdone", measure);
     return () => document.fonts.removeEventListener("loadingdone", measure);
   }, [measure]);
-
-  useLayoutEffect(() => {
-    const text = textRef.current;
-    if (!text || focusRequest?.editId !== edit.id) return;
-    text.focus({ preventScroll: true });
-    placeCaret(text, focusRequest.clientX, focusRequest.clientY);
-    clearFocusRequest();
-  }, [focusRequest, edit.id, clearFocusRequest]);
 
   const left = Math.min(...shown.map((box) => box.left));
   const widest = Math.max(...shown.map((box) => box.left)) - left;
@@ -180,37 +146,40 @@ function PdfEditBlock({
           textIndent: paragraph.indent * scale,
         }}
         onInput={measure}
-        onFocus={() => setFocused(true)}
         onBlur={(event) => {
-          setFocused(false);
-          updateEdit(edit.id, { text: event.currentTarget.innerText });
+          const text = event.currentTarget.innerText;
+          // Back to what the page says: give the paragraph back to the page,
+          // which sets it better than this can.
+          if (text === paragraph.text) removeEdit(edit.id);
+          else updateEdit(edit.id, { text });
         }}
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
           event.preventDefault();
           removeEdit(edit.id);
         }}
+        {...{ [PARAGRAPH_HOST]: "" }}
       />
       {/* Same type, out of flow: where its baseline falls is where the text's
           does, without putting a measuring element inside editable content. */}
       <div className="pdf-edit-probe" style={textStyle} aria-hidden>
         <span ref={probeRef} />
       </div>
-      {focused &&
-        shown.map((box, index) => (
-          <div
-            key={`outline-${index}`}
-            className="pdf-edit-outline"
-            style={{
-              left: box.left - left,
-              top: box.top - shown[0].top,
-              width: textWidth,
-              height: box.lines * lineHeight,
-            }}
-          />
-        ))}
     </div>
   );
+}
+
+/** Take the caret, and the keystroke, from the page's rendering. `insertText`
+ *  and `delete` are the two editing commands every engine still implements,
+ *  and both go through the browser's own undo history. */
+function receive(text: HTMLElement, handoff: Handoff): void {
+  text.focus({ preventScroll: true });
+  selectText(text, handoff.anchor, handoff.focus);
+  if (handoff.input?.kind === "insert") {
+    document.execCommand("insertText", false, handoff.input.text);
+  } else if (handoff.input?.kind === "delete") {
+    document.execCommand("delete");
+  }
 }
 
 /** The floats that confine one fragment's lines to its place: a spacer down
@@ -259,39 +228,4 @@ function fragmentBoxes(
     });
   }
   return boxes;
-}
-
-/** How many lines the text wrapped to. Counted from where its line boxes are
- *  rather than from the element's height, which includes every page break the
- *  paragraph crosses. */
-function countLines(text: HTMLElement, lineHeight: number): number {
-  const range = document.createRange();
-  range.selectNodeContents(text);
-  const tops: number[] = [];
-  for (const rect of range.getClientRects()) {
-    if (rect.height === 0) continue;
-    if (!tops.some((top) => Math.abs(top - rect.top) < lineHeight / 2)) tops.push(rect.top);
-  }
-  return Math.max(1, tops.length);
-}
-
-/** Put the caret where the click that opened the edit landed. */
-function placeCaret(text: HTMLElement, clientX: number, clientY: number): void {
-  const range = caretRangeAt(clientX, clientY);
-  if (!range || !text.contains(range.startContainer)) return;
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-}
-
-function caretRangeAt(clientX: number, clientY: number): Range | null {
-  const position = document.caretPositionFromPoint?.(clientX, clientY);
-  if (position) {
-    const range = document.createRange();
-    range.setStart(position.offsetNode, position.offset);
-    range.collapse(true);
-    return range;
-  }
-  // WebKit has only the older name.
-  return document.caretRangeFromPoint?.(clientX, clientY) ?? null;
 }

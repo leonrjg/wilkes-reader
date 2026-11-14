@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { BoundingBox } from "../documentCoordinates.js";
-import type { PageView, ParagraphHit, PdfEditSession } from "./usePdfEditSession.js";
+import type { PageView, PdfEditSession } from "./usePdfEditSession.js";
 
 /**
  * One page in edit mode: the page's raster, cut into strips and put back where
@@ -10,7 +10,8 @@ import type { PageView, ParagraphHit, PdfEditSession } from "./usePdfEditSession
  * does reach is composed: bare paper, then its fixed areas, then every strip
  * placed on it -- its own and any pushed onto it from the page before. Edited
  * paragraphs are not drawn here at all; they are live text laid over the gap
- * this leaves (`PdfEditBlocks`).
+ * this leaves, and so is everything the reader does with the pointer and the
+ * keyboard (`PdfEditBlocks`). This is only the paper.
  */
 
 interface PdfEditPageProps {
@@ -37,7 +38,6 @@ export default function PdfEditPage({
   onRenderSuccess,
 }: PdfEditPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [hover, setHover] = useState<ParagraphHit | null>(null);
   const onRenderSuccessRef = useRef(onRenderSuccess);
   onRenderSuccessRef.current = onRenderSuccess;
 
@@ -74,34 +74,10 @@ export default function PdfEditPage({
     };
   }, [flow, placements, rasters, pageNumber, documentPages, pixelsPerUnit]);
 
-  const pagePoint = (event: React.MouseEvent) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    return { x: (event.clientX - bounds.left) / scale, y: (event.clientY - bounds.top) / scale };
-  };
-
   return (
     <div
       className="pdf-page pdf-edit-page"
-      style={{
-        position: "relative",
-        width: Math.floor(size.width * scale),
-        cursor: hover ? "text" : "default",
-      }}
-      onMouseMove={(event) => {
-        const { x, y } = pagePoint(event);
-        const hit = session.paragraphAt(pageNumber, x, y);
-        setHover((current) => (current?.paragraph === hit?.paragraph ? current : hit));
-      }}
-      onMouseLeave={() => setHover(null)}
-      onClick={(event) => {
-        const { x, y } = pagePoint(event);
-        const hit = session.paragraphAt(pageNumber, x, y);
-        const canvas = canvasRef.current;
-        if (!hit || !canvas) return;
-        const color = inkColour(canvas, hit.box, pixelsPerUnit);
-        setHover(null);
-        session.beginEdit(hit.paragraph, color, { clientX: event.clientX, clientY: event.clientY });
-      }}
+      style={{ position: "relative", width: Math.floor(size.width * scale) }}
     >
       <canvas
         ref={canvasRef}
@@ -113,17 +89,6 @@ export default function PdfEditPage({
           height: `${Math.floor(size.height * scale)}px`,
         }}
       />
-      {hover && (
-        <div
-          className="pdf-edit-target"
-          style={{
-            left: hover.box.x * scale,
-            top: hover.box.y * scale,
-            width: hover.box.width * scale,
-            height: hover.box.height * scale,
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -200,26 +165,4 @@ function copyStrip(
     right - left,
     bottom - top,
   );
-}
-
-/** The colour a paragraph is set in: the darkest thing drawn in its box. Read
- *  from the canvas because the text layer does not carry fill colours. */
-function inkColour(canvas: HTMLCanvasElement, box: BoundingBox, pixelsPerUnit: number): string {
-  const context = canvas.getContext("2d");
-  const left = Math.max(0, Math.floor(box.x * pixelsPerUnit));
-  const top = Math.max(0, Math.floor(box.y * pixelsPerUnit));
-  const width = Math.min(canvas.width - left, Math.ceil(box.width * pixelsPerUnit));
-  const height = Math.min(canvas.height - top, Math.ceil(box.height * pixelsPerUnit));
-  if (!context || width <= 0 || height <= 0) return "black";
-  const { data } = context.getImageData(left, top, width, height);
-  let darkest = 0;
-  let luminance = Infinity;
-  for (let offset = 0; offset < data.length; offset += 4) {
-    const value = data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114;
-    if (value < luminance) {
-      luminance = value;
-      darkest = offset;
-    }
-  }
-  return `rgb(${data[darkest]}, ${data[darkest + 1]}, ${data[darkest + 2]})`;
 }

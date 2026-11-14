@@ -24,6 +24,25 @@ export interface TextRun {
   fontSize: number;
   /** The name pdf.js loaded the run's embedded font under. */
   fontName: string;
+  /** The colour the run is drawn in, as CSS. */
+  color: string;
+}
+
+/** One line of a paragraph as the page set it. */
+export interface ParagraphLine {
+  /** The item whose strip of the page this line is on. */
+  itemId: string;
+  text: string;
+  /** Where this line's text begins in the paragraph's. */
+  start: number;
+  /** How many of the line's characters the paragraph's text keeps: all of
+   *  them, or one fewer when the line ended in a typesetter's hyphen. */
+  kept: number;
+  /** The line's baseline, measured down from the top of its item. */
+  baselineOffset: number;
+  /** The line's left edge, measured in from its column's. */
+  inset: number;
+  width: number;
 }
 
 export type TextAlign = "left" | "justify";
@@ -47,7 +66,11 @@ export interface Paragraph {
   indent: number;
   fontName: string;
   fontSize: number;
+  color: string;
   align: TextAlign;
+  /** The lines as the page set them, for placing a caret over the page's own
+   *  rendering of a paragraph nobody has changed. */
+  lines: ParagraphLine[];
 }
 
 interface Line {
@@ -57,6 +80,7 @@ interface Line {
   right: number;
   fontSize: number;
   fontName: string;
+  color: string;
 }
 
 /** A gap this much wider than the column's usual one starts a new paragraph. */
@@ -186,6 +210,7 @@ function lineFrom(runs: TextRun[]): Line {
     right: inked.length > 0 ? Math.max(...inked.map((run) => run.x + run.width)) : main.x,
     fontSize: main.fontSize,
     fontName: main.fontName,
+    color: main.color,
   };
 }
 
@@ -197,6 +222,8 @@ function paragraphFrom(
   splittable: boolean,
 ): Paragraph {
   const lines = group.flatMap((entry) => entry.lines);
+  const itemOf = group.flatMap((entry) => entry.lines.map(() => entry.item));
+  const joined = joinLines(lines.map((line) => line.text));
   const first = lines[0];
   const x = Math.min(...lines.map((line) => line.left));
   const right = Math.max(...lines.map((line) => line.right));
@@ -214,7 +241,7 @@ function paragraphFrom(
     page,
     itemIds: group.map((entry) => entry.item.id),
     splittable,
-    text: joinLines(lines.map((line) => line.text)),
+    text: joined.text,
     lineCount: lines.length,
     firstBaseline: first.baseline,
     lineHeight: steps.length > 0 ? median(steps) : fontSize * 1.2,
@@ -223,22 +250,44 @@ function paragraphFrom(
     indent: first.left - x,
     fontName: mostCommon(lines.map((line) => line.fontName)),
     fontSize,
+    color: mostCommon(lines.map((line) => line.color)),
     align: justified ? "justify" : "left",
+    lines: lines.map((line, index) => {
+      const item = itemOf[index];
+      const itemTop = item.content.kind === "slice" ? item.content.rect.y : line.baseline;
+      return {
+        itemId: item.id,
+        text: line.text,
+        ...joined.spans[index],
+        baselineOffset: line.baseline - itemTop,
+        inset: line.left - column.x,
+        width: line.right - line.left,
+      };
+    }),
   };
 }
 
-/** Lines back into running text. A hyphen at a line's end that the next line
- *  continues in lower case was put there by the typesetter, not the author. */
-function joinLines(lines: string[]): string {
+/** Lines back into running text, and where each line went in it. A hyphen at
+ *  a line's end that the next line continues in lower case was put there by
+ *  the typesetter, not the author. */
+function joinLines(lines: string[]): {
+  text: string;
+  spans: Array<{ start: number; kept: number }>;
+} {
   let text = "";
+  const spans: Array<{ start: number; kept: number }> = [];
   for (const line of lines) {
-    if (/\p{L}-$/u.test(text) && /^\p{Ll}/u.test(line)) {
-      text = text.slice(0, -1) + line;
-    } else {
-      text += (text ? " " : "") + line;
+    const previous = spans[spans.length - 1];
+    if (previous && /\p{L}-$/u.test(text) && /^\p{Ll}/u.test(line)) {
+      text = text.slice(0, -1);
+      previous.kept -= 1;
+    } else if (text) {
+      text += " ";
     }
+    spans.push({ start: text.length, kept: line.length });
+    text += line;
   }
-  return text;
+  return { text, spans };
 }
 
 function mostCommon(values: string[]): string {

@@ -65,12 +65,14 @@ function paragraph(flow: PageFlow, from: number, to: number, splittable = true):
     indent: 0,
     fontName: "f",
     fontSize: 10,
+    color: "black",
     align: "left",
+    lines: [],
   };
 }
 
 function edited(flow: PageFlow, from: number, to: number, lineCount: number, splittable = true) {
-  return { ...createEdit("e", paragraph(flow, from, to, splittable), "black"), lineCount, ascent: 8 };
+  return { ...createEdit("e", paragraph(flow, from, to, splittable)), lineCount, ascent: 8 };
 }
 
 describe("layoutPage", () => {
