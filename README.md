@@ -84,7 +84,8 @@ goes to `openExternal`.
 `<PdfViewer editing />` makes a PDF's text something to type in. Nothing on the
 page changes until the reader types: every paragraph has invisible text laid
 over the page's own rendering, and the whole document is one editable surface,
-so a click puts a caret between two letters, an arrow key carries it from one
+so a click puts a caret between two letters — or, beside the text, on the
+nearest line, as in a word processor — an arrow key carries it from one
 paragraph into the next, and a selection runs across as many paragraphs as the
 reader drags over. The first keystroke in a paragraph takes that paragraph —
 and only that one — from the page and sets it as live text, in the runs of type
@@ -151,7 +152,7 @@ It lives in `src/pdfEdit/`, in layers that each know about one thing:
 | `usePdfEditSession.ts` | The state: what is known about the pages, and what was changed |
 | `PdfEditPage.tsx` | The paper: pages recomposed from strips |
 | `PdfEditLayer.tsx`, `PageParagraph.tsx`, `LiveParagraph.tsx` | The text: untouched paragraphs as a caret over the page, changed ones as live text |
-| `editInput.ts`, `caretTravel.ts` | What the keyboard means: which keystrokes are the browser's, and which change the paragraphs |
+| `editInput.ts`, `caretTravel.ts` | What the keyboard means: which keystrokes are the browser's, and which change the paragraphs; where a click beside the text puts the caret |
 | `fragmentFloats.ts` | How one block of live text is made to stand in several places |
 
 What it does not do:

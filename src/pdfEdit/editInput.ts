@@ -72,9 +72,10 @@ export function attachEditInput(
   };
 
   /** The paragraphs on screen, in reading order -- which is their order in
-   *  the document. */
+   *  the document. Only those in it: one is withdrawn as its element leaves,
+   *  but input can arrive while React is between the two. */
   const inOrder = () =>
-    [...handles.values()].sort((a, b) =>
+    [...handles.values()].filter((handle) => handle.element.isConnected).sort((a, b) =>
       a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
     );
 

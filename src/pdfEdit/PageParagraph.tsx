@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { PARAGRAPH_HOST } from "./caretTravel.js";
 import type { RegisterParagraph } from "./editInput.js";
 import { textOffsetOf } from "./editableText.js";
@@ -33,7 +33,9 @@ interface PageParagraphProps {
 export default function PageParagraph({ session, paragraph, geometryOf, register }: PageParagraphProps) {
   const hostRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  // Withdrawn as the DOM changes, not after: input that comes in between must
+  // not find a paragraph that is no longer in the document.
+  useLayoutEffect(() => {
     const element = hostRef.current;
     if (!element) return;
     return register({

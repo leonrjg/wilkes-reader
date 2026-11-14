@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { attachCaretPlacement, type PageExtent } from "./caretTravel.js";
 import { attachEditInput, type ParagraphHandle, type RegisterParagraph } from "./editInput.js";
 import LiveParagraph from "./LiveParagraph.js";
 import PageParagraph from "./PageParagraph.js";
@@ -23,6 +24,8 @@ export interface PageGeometry {
   top: number;
   /** CSS px per page unit. */
   scale: number;
+  /** CSS px from the page's top to its bottom. */
+  height: number;
 }
 
 /** How far past the last page on screen a cascade is followed. */
@@ -54,6 +57,39 @@ export default function PdfEditLayer({ session, pages, geometryOf }: PdfEditLaye
     const layer = layerRef.current;
     if (!layer) return;
     return attachEditInput(layer, () => sessionRef.current, handles.current);
+  }, []);
+
+  // A press beside the text puts the caret on the nearest line of the page.
+  // The layer is sized to nothing at the scrolled content's origin, so the
+  // content it is in is where the pages are pressed, and the layer's own place
+  // on screen is the origin page geometry counts from.
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+  const geometryRef = useRef(geometryOf);
+  geometryRef.current = geometryOf;
+  useEffect(() => {
+    const layer = layerRef.current;
+    const surface = layer?.parentElement;
+    if (!layer || !surface) return;
+    // Only as much of the page as is in view: a line scrolled out of it is not
+    // where a reader pressing beside the text means the caret to go -- and
+    // the browser cannot find a place in text it does not show.
+    const pageAt = (clientY: number): PageExtent | null => {
+      const origin = layer.getBoundingClientRect().top;
+      const view = surface.parentElement?.getBoundingClientRect();
+      for (const page of pagesRef.current) {
+        const geometry = geometryRef.current(page);
+        if (!geometry) continue;
+        const top = origin + geometry.top;
+        const bottom = top + geometry.height;
+        if (clientY < top || clientY >= bottom) continue;
+        return view
+          ? { top: Math.max(top, view.top), bottom: Math.min(bottom, view.bottom) }
+          : { top, bottom };
+      }
+      return null;
+    };
+    return attachCaretPlacement(surface, layer, pageAt);
   }, []);
 
   // An edit's consequences are followed a little past what is on screen, so

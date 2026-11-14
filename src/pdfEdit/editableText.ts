@@ -96,12 +96,21 @@ export function caretRect(): DOMRect | null {
 
 /** Put the caret at the text position nearest a point, if that is in `root`. */
 export function placeCaretAtPoint(root: Node, clientX: number, clientY: number): boolean {
-  const range = rangeAtPoint(clientX, clientY);
-  if (!range || !root.contains(range.startContainer)) return false;
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
+  const position = positionAtPoint(root, clientX, clientY);
+  if (!position) return false;
+  window.getSelection()?.collapse(position.node, position.offset);
   return true;
+}
+
+/** The text position nearest a point, if that is in `root`. */
+export function positionAtPoint(
+  root: Node,
+  clientX: number,
+  clientY: number,
+): { node: Node; offset: number } | null {
+  const range = rangeAtPoint(clientX, clientY);
+  if (!range || !root.contains(range.startContainer)) return null;
+  return { node: range.startContainer, offset: range.startOffset };
 }
 
 function rangeAtPoint(clientX: number, clientY: number): Range | null {

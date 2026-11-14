@@ -585,7 +585,13 @@ export default function PdfViewer({
     }
     return (pageNumber: number): PageGeometry | null => {
       const metric = layoutMetrics[pageNumber - 1];
-      return metric ? { top: tops[pageNumber - 1], scale: renderedWidth / metric.width } : null;
+      return metric
+        ? {
+            top: tops[pageNumber - 1],
+            scale: renderedWidth / metric.width,
+            height: getScaledPageHeight(metric, renderedWidth),
+          }
+        : null;
     };
   }, [layoutMetrics, renderedWidth]);
 

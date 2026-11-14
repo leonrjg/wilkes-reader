@@ -112,7 +112,10 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   // the whole of a join: its being here is the change.
   const editRef = useRef(edit);
   editRef.current = edit;
-  useEffect(() => {
+  // Announced as the DOM changes, not after: WebKit puts the editor's own
+  // typing -- the keystroke handed over below -- through the same input
+  // handling as the reader's, and it has to find this paragraph there.
+  useLayoutEffect(() => {
     const element = textRef.current;
     if (!element) return;
     return register({
