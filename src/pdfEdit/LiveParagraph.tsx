@@ -156,7 +156,10 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
     measure();
     rememberSoon();
   };
-  useEffect(() => {
+  // Watching from before the paragraph is given the keystroke that made it
+  // live text, which is typed into it as it mounts: a paragraph changed by
+  // that one keystroke and no other has still been changed.
+  useLayoutEffect(() => {
     const text = textRef.current;
     if (!text) return;
     const observer = new MutationObserver(() => typedRef.current());
