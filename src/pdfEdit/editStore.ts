@@ -19,6 +19,11 @@ export interface PdfEditDraft {
 export interface DraftEdit {
   paragraph: Paragraph;
   runs: StyledRun[];
+  /** For a paragraph the reader made: which edit of the draft it follows, by
+   *  its place in the list. */
+  after?: number;
+  /** Part of a change to the document's paragraphs: one split, two joined. */
+  structural?: boolean;
 }
 
 export interface PdfEditStore {
@@ -55,12 +60,18 @@ function isUsable(edit: DraftEdit): boolean {
     paragraph !== undefined &&
     Number.isInteger(paragraph.page) &&
     Array.isArray(paragraph.itemIds) &&
-    paragraph.itemIds.length > 0 &&
+    (paragraph.itemIds.length > 0 || Number.isInteger(edit.after)) &&
     Array.isArray(paragraph.lines) &&
     Array.isArray(paragraph.styles) &&
     paragraph.styles[paragraph.baseStyle ?? -1] !== undefined &&
     typeof paragraph.text === "string" &&
-    [paragraph.lineHeight, paragraph.firstBaseline, paragraph.lineCount, paragraph.fontSize].every(Number.isFinite) &&
+    [
+      paragraph.lineHeight,
+      paragraph.firstBaseline,
+      paragraph.lastBaseline,
+      paragraph.lineCount,
+      paragraph.fontSize,
+    ].every(Number.isFinite) &&
     box !== undefined &&
     [box.x, box.y, box.width, box.height].every(Number.isFinite)
   );

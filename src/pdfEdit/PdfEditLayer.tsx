@@ -49,35 +49,24 @@ export default function PdfEditLayer({ session, pages, geometryOf }: PdfEditLaye
       className="pdf-edit-layer"
       onKeyDown={(event) => travelOnArrow(event, layerRef.current)}
     >
-      {mounted.flatMap((page) => {
-        const paragraphs = session.paragraphsOf(page);
-        const listed = new Set(paragraphs.map(paragraphKey));
-        // An edit holds the paragraph as it was when taken over. Should a later
-        // analysis group that page's lines differently, the edit still stands.
-        const orphaned = session.edits.filter(
-          (edit) => edit.paragraph.page === page && !listed.has(paragraphKey(edit.paragraph)),
-        );
-        return [
-          ...paragraphs.map((paragraph) => {
-            const edit = session.editOf(paragraph);
-            if (edit) {
-              return <LiveParagraph key={edit.id} session={session} edit={edit} geometryOf={geometryOf} />;
-            }
-            if (!inView.has(page)) return null;
+      {mounted.flatMap((page) =>
+        session.slotsOf(page).map((slot) => {
+          if (slot.edit) {
             return (
-              <PageParagraph
-                key={paragraphKey(paragraph)}
-                session={session}
-                paragraph={paragraph}
-                geometryOf={geometryOf}
-              />
+              <LiveParagraph key={slot.edit.id} session={session} edit={slot.edit} geometryOf={geometryOf} />
             );
-          }),
-          ...orphaned.map((edit) => (
-            <LiveParagraph key={edit.id} session={session} edit={edit} geometryOf={geometryOf} />
-          )),
-        ];
-      })}
+          }
+          if (!inView.has(page)) return null;
+          return (
+            <PageParagraph
+              key={paragraphKey(slot.paragraph)}
+              session={session}
+              paragraph={slot.paragraph}
+              geometryOf={geometryOf}
+            />
+          );
+        }),
+      )}
     </div>
   );
 }

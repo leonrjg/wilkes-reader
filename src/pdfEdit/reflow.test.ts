@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyEdits, createEdit, editBackdrops, editFragments } from "./edits.js";
 import type { FlowColumn, FlowItem, PageFlow } from "./flow.js";
-import type { Paragraph } from "./paragraphs.js";
+import { paragraphAfter, type Paragraph } from "./paragraphs.js";
 import { layoutPage, reflowDocument } from "./reflow.js";
 
 const LINE = 10;
@@ -63,6 +63,7 @@ function paragraph(flow: PageFlow, from: number, to: number, splittable = true):
     // With line boxes as tall as a line and its gap, and an ascent that puts
     // the box's top on the ink's, an unchanged edit occupies what it replaced.
     firstBaseline: first.rect.y + 8,
+    lastBaseline: first.rect.y + 8 + (items.length - 1) * (LINE + GAP),
     lineHeight: LINE + GAP,
     inset: 0,
     width: 200,
@@ -213,6 +214,41 @@ describe("reflowDocument", () => {
     const tail = backdrops[backdrops.length - 1];
     expect(tail.y).toBe(lineTop + 3 * 12);
     expect(tail.source.rect.height).toBe(6);
+  });
+
+  it("puts a paragraph the reader made after the one it was split from", () => {
+    const first = page(1, [column(1, "a", 50, 10, 100)]);
+    // Lines 2 and 3 are a paragraph; Enter made a second one of two lines
+    // after it. The gap the page left after the paragraph goes before the new
+    // one as well, and what followed is pushed down by its height and gap.
+    const kept = edited(first, 2, 4, 2);
+    const made = {
+      ...createEdit("made", paragraphAfter(kept.paragraph)),
+      after: kept.id,
+      lineCount: 2,
+      ascent: 8,
+    };
+    const reflow = reflowDocument((n) => applyEdits(flows([first])(n), [kept, made]), [1], 1);
+    const tops = Object.fromEntries(reflow.plans.get(1)!.placements.map((p) => [p.item.id, p.y]));
+    expect(tops["e:1"]).toBe(100 + 3 * 12);
+    expect(tops["made:0"]).toBe(100 + 4 * 12);
+    expect(tops["made:1"]).toBe(100 + 5 * 12);
+    expect(tops["1:a:4"]).toBe(100 + 6 * 12);
+  });
+
+  it("chains paragraphs made one after another, in order", () => {
+    const first = page(1, [column(1, "a", 50, 6, 100)]);
+    const kept = edited(first, 0, 1, 1);
+    const second = { ...createEdit("second", paragraphAfter(kept.paragraph)), after: "e", lineCount: 1, ascent: 8 };
+    const third = { ...createEdit("third", paragraphAfter(kept.paragraph)), after: "second", lineCount: 1, ascent: 8 };
+    // Given out of order: the third cannot be placed until the second is.
+    const reflow = reflowDocument((n) => applyEdits(flows([first])(n), [third, kept, second]), [1], 1);
+    expect(reflow.plans.get(1)!.placements.slice(0, 4).map((p) => p.item.id)).toEqual([
+      "e:0",
+      "second:0",
+      "third:0",
+      "1:a:1",
+    ]);
   });
 
   it("moves a paragraph that cannot be split as one block", () => {

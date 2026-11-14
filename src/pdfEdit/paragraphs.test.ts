@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FlowItem, PageFlow } from "./flow.js";
-import { paragraphsOf, type TextRun } from "./paragraphs.js";
+import { splitRuns } from "./edits.js";
+import { mergeParagraphs, paragraphsOf, type TextRun } from "./paragraphs.js";
 
 const LEFT = 50;
 const RIGHT = 250;
@@ -112,5 +113,42 @@ describe("paragraphsOf", () => {
     const lines = [line(0, 40, "Some text above a figure.")];
     const figure = line(1, 60, "");
     expect(paragraphsOf(flowOf([...lines, figure]), [lines[0].run])).toHaveLength(1);
+  });
+});
+
+describe("mergeParagraphs", () => {
+  it("makes one paragraph of two, running straight on", () => {
+    const lines = [
+      line(0, 40, "First paragraph, one line.", LEFT, 130),
+      line(1, 70, "Second, in another face.", LEFT, 180),
+    ];
+    lines[1].run.fontName = "f2";
+    const [first, second] = paragraphsOf(flowOf(lines, [4, 18]), lines.map(({ run }) => run));
+    const merged = mergeParagraphs(first, second);
+
+    expect(merged.text).toBe("First paragraph, one line.Second, in another face.");
+    expect(merged.itemIds).toEqual(["1:0:0:0", "1:0:0:1"]);
+    expect(merged.area).toEqual({ x: LEFT, y: 40, width: 200, height: 38 });
+    expect(merged.lastBaseline).toBe(second.lastBaseline);
+    // The second paragraph's runs point into the joined table of styles.
+    expect(merged.runs.map((run) => merged.styles[run.style].fontName)).toEqual(["f1", "f2"]);
+    expect(merged.lines[1].start).toBe(first.text.length);
+  });
+});
+
+describe("splitRuns", () => {
+  const runs = [
+    { text: "plain ", style: 0 },
+    { text: "italic", style: 1 },
+  ];
+
+  it("cuts inside a run and between runs", () => {
+    expect(splitRuns(runs, 3)).toEqual([[{ text: "pla", style: 0 }], [{ text: "in ", style: 0 }, runs[1]]]);
+    expect(splitRuns(runs, 6)).toEqual([[runs[0]], [runs[1]]]);
+  });
+
+  it("leaves one side empty at either end", () => {
+    expect(splitRuns(runs, 0)).toEqual([[], runs]);
+    expect(splitRuns(runs, 99)).toEqual([runs, []]);
   });
 });

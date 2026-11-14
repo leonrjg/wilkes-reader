@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { PARAGRAPH_HOST } from "./caretTravel.js";
 import { textOffsetOf } from "./editableText.js";
-import { estimatedAscent } from "./edits.js";
+import { estimatedAscent, splitRuns } from "./edits.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
 import type { Paragraph } from "./paragraphs.js";
 import { lineHeightPx, pageFace, paragraphTextStyle } from "./paragraphStyle.js";
@@ -31,6 +31,10 @@ interface PageParagraphProps {
 export default function PageParagraph({ session, paragraph, geometryOf }: PageParagraphProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const { beginEdit } = session;
+  // Read when a key is pressed, not when the listener was attached: what a
+  // paragraph's neighbours are changes with every edit around it.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   // Native listeners: React's `onBeforeInput` is its own synthesis from key
   // events, and has neither an input type nor the range it applies to.
@@ -50,10 +54,19 @@ export default function PageParagraph({ session, paragraph, geometryOf }: PagePa
       if (!range) return;
       const start = offsetIn(host, paragraph, range.startContainer, range.startOffset);
       const end = offsetIn(host, paragraph, range.endContainer, range.endOffset);
+      const slot = { paragraph, edit: null };
       const input = pendingInput(event);
-      // A deletion with nothing in range is Backspace at the paragraph's first
-      // character or Delete at its last: nothing of this paragraph goes.
-      if (input.kind === "delete" && start === end) return;
+      // A deletion with nothing in range is Backspace before the paragraph's
+      // first character or Delete after its last: nothing of this paragraph
+      // goes, but the break between it and its neighbour does.
+      if (input.kind === "delete" && start === end) {
+        if (event.inputType.endsWith("Backward") && start === 0) {
+          sessionRef.current.joinParagraphs(slot, -1, paragraph.runs);
+        } else if (event.inputType.endsWith("Forward") && start >= paragraph.text.length) {
+          sessionRef.current.joinParagraphs(slot, 1, paragraph.runs);
+        }
+        return;
+      }
       handOver(start, end, input);
     };
 
@@ -69,11 +82,28 @@ export default function PageParagraph({ session, paragraph, geometryOf }: PagePa
       );
     };
 
+    // Enter makes two paragraphs of this one. Caught as a key because
+    // plain-text editing reports Enter and Shift+Enter as the same input; with
+    // Shift it goes on to become a line break inside the paragraph.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+      const range = window.getSelection()?.getRangeAt(0);
+      if (!range) return;
+      event.preventDefault();
+      sessionRef.current.splitParagraph(
+        { paragraph, edit: null },
+        splitRuns(paragraph.runs, offsetIn(host, paragraph, range.startContainer, range.startOffset))[0],
+        splitRuns(paragraph.runs, offsetIn(host, paragraph, range.endContainer, range.endOffset))[1],
+      );
+    };
+
     host.addEventListener("beforeinput", onBeforeInput);
     host.addEventListener("compositionstart", onCompositionStart);
+    host.addEventListener("keydown", onKeyDown);
     return () => {
       host.removeEventListener("beforeinput", onBeforeInput);
       host.removeEventListener("compositionstart", onCompositionStart);
+      host.removeEventListener("keydown", onKeyDown);
     };
   }, [paragraph, beginEdit]);
 
@@ -120,9 +150,7 @@ export default function PageParagraph({ session, paragraph, geometryOf }: PagePa
 
 function pendingInput(event: InputEvent): PendingInput {
   if (event.inputType.startsWith("delete")) return { kind: "delete" };
-  if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
-    return { kind: "insert", text: "\n" };
-  }
+  if (event.inputType === "insertLineBreak") return { kind: "insert", text: "\n" };
   return { kind: "insert", text: event.data ?? event.dataTransfer?.getData("text/plain") ?? "" };
 }
 

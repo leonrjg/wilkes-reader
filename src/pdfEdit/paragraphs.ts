@@ -85,6 +85,7 @@ export interface Paragraph {
   baseStyle: number;
   lineCount: number;
   firstBaseline: number;
+  lastBaseline: number;
   /** Baseline to baseline. */
   lineHeight: number;
   /** The left edge of the paragraph's lines, first-line indent aside, measured
@@ -375,6 +376,7 @@ function paragraphFrom(
     baseStyle,
     lineCount: lines.length,
     firstBaseline: first.baseline,
+    lastBaseline: lines[lines.length - 1].baseline,
     lineHeight: steps.length > 0 ? median(steps) : fontSize * 1.2,
     inset: x - column.x,
     width: reach - x,
@@ -396,6 +398,60 @@ function paragraphFrom(
       };
     }),
   };
+}
+
+/**
+ * Two paragraphs of one column, the second directly under the first, as one:
+ * what a reader gets by deleting the break between them. It replaces the
+ * items of both, and its text runs straight on from one into the other.
+ */
+export function mergeParagraphs(first: Paragraph, second: Paragraph): Paragraph {
+  const styles = [...first.styles];
+  const top = Math.min(first.area.y, second.area.y);
+  const bottom = Math.max(first.area.y + first.area.height, second.area.y + second.area.height);
+  return {
+    ...first,
+    itemIds: [...first.itemIds, ...second.itemIds],
+    area: { ...first.area, y: top, height: bottom - top },
+    text: first.text + second.text,
+    runs: [...first.runs, ...adoptRuns(styles, second.styles, second.runs)],
+    styles,
+    lineCount: first.lineCount + second.lineCount,
+    lastBaseline: second.lastBaseline,
+    lines: [
+      ...first.lines,
+      ...second.lines.map((line) => ({ ...line, start: line.start + first.text.length })),
+    ],
+  };
+}
+
+/** A paragraph with nothing in it, set like `paragraph` and replacing nothing
+ *  on the page: what the reader starts by pressing Enter. */
+export function paragraphAfter(paragraph: Paragraph): Paragraph {
+  return {
+    ...paragraph,
+    itemIds: [],
+    area: { ...paragraph.area, y: paragraph.area.y + paragraph.area.height, height: 0 },
+    text: "",
+    runs: [],
+    lineCount: 0,
+    lines: [],
+  };
+}
+
+/** Runs written against one table of styles, rewritten against another. A
+ *  style the other table lacks is added to it. */
+export function adoptRuns(
+  styles: RunStyle[],
+  from: readonly RunStyle[],
+  runs: readonly StyledRun[],
+): StyledRun[] {
+  return runs.map((run) => {
+    const style = from[run.style];
+    let index = styles.findIndex((known) => styleKey(known) === styleKey(style));
+    if (index < 0) index = styles.push(style) - 1;
+    return { text: run.text, style: index };
+  });
 }
 
 /** Lines back into running text, and where each line went in it. A hyphen at

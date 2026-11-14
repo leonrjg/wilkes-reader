@@ -15,9 +15,22 @@ import type { PagePlan } from "./reflow.js";
  */
 export interface ParagraphEdit {
   id: string;
+  /** What this replaces on the page, and how it is set. A paragraph the reader
+   *  made -- by pressing Enter in another -- replaces nothing: its `itemIds`
+   *  are empty, and `after` says where it goes instead. */
   paragraph: Paragraph;
+  /** The edit this one comes directly after, when it replaces nothing. */
+  after: string | null;
   /** What the paragraph says now, in the styles of `paragraph.styles`. */
   runs: StyledRun[];
+  /** Raised when `runs` is changed from outside the live text -- a paragraph
+   *  cut in two keeps its first half -- so the text on screen is written
+   *  again. What the reader types does not raise it: that is already there. */
+  revision: number;
+  /** True once the edit is part of a change to the document's paragraphs --
+   *  one split, two joined. Such an edit is never handed back to the page for
+   *  saying what the page says: its being there is the change. */
+  structural: boolean;
   /** How many lines that wraps to, as the browser last laid it out. */
   lineCount: number;
   /** A line box's top to its baseline, as the browser sets this type. Null
@@ -26,7 +39,39 @@ export interface ParagraphEdit {
 }
 
 export function createEdit(id: string, paragraph: Paragraph): ParagraphEdit {
-  return { id, paragraph, runs: paragraph.runs, lineCount: paragraph.lineCount, ascent: null };
+  return {
+    id,
+    paragraph,
+    after: null,
+    runs: paragraph.runs,
+    revision: 0,
+    structural: false,
+    lineCount: Math.max(1, paragraph.lineCount),
+    ascent: null,
+  };
+}
+
+/** Whether an edit stands in for something on the page, or only follows
+ *  another edit. */
+export const replacesItems = (edit: ParagraphEdit) => edit.paragraph.itemIds.length > 0;
+
+/** Runs cut at an offset into their text. */
+export function splitRuns(runs: readonly StyledRun[], offset: number): [StyledRun[], StyledRun[]] {
+  const before: StyledRun[] = [];
+  const after: StyledRun[] = [];
+  let remaining = Math.max(0, offset);
+  for (const run of runs) {
+    if (remaining >= run.text.length) {
+      before.push(run);
+    } else if (remaining <= 0) {
+      after.push(run);
+    } else {
+      before.push({ ...run, text: run.text.slice(0, remaining) });
+      after.push({ ...run, text: run.text.slice(remaining) });
+    }
+    remaining -= run.text.length;
+  }
+  return [before, after];
 }
 
 /** A line box's top to its baseline for a paragraph's type, as a typical font
@@ -44,13 +89,51 @@ function ascentOf(edit: ParagraphEdit): number {
 export function applyEdits(flow: PageFlow, edits: readonly ParagraphEdit[]): PageFlow {
   const own = edits.filter((edit) => edit.paragraph.page === flow.page);
   if (own.length === 0) return flow;
+  const replacing = own.filter(replacesItems);
+  const following = own.filter((edit) => !replacesItems(edit));
   return {
     ...flow,
     regions: flow.regions.map((region) => ({
       ...region,
-      columns: region.columns.map((column) => own.reduce(replaceParagraph, column)),
+      columns: region.columns.map((column) =>
+        insertFollowing(replacing.reduce(replaceParagraph, column), following),
+      ),
     })),
   };
+}
+
+/** Put the paragraphs the reader made after the edits they follow. One can
+ *  follow another of its kind, so this goes round until none is left that has
+ *  somewhere to go. */
+function insertFollowing(column: FlowColumn, following: readonly ParagraphEdit[]): FlowColumn {
+  let items = column.items;
+  let waiting = [...following];
+  for (;;) {
+    const placed: ParagraphEdit[] = [];
+    for (const edit of waiting) {
+      // The last line of the edit it follows: that edit may be many lines.
+      let anchor = items.length - 1;
+      while (anchor >= 0) {
+        const { content } = items[anchor];
+        if (content.kind === "edit" && content.editId === edit.after) break;
+        anchor--;
+      }
+      if (anchor < 0) continue;
+      const next = items[anchor + 1];
+      // The space the page left after the paragraph this follows is the space
+      // between paragraphs here, so it is what goes before the new one too.
+      const gap = next ? next.gapBefore : edit.paragraph.lineHeight / 2;
+      items = [
+        ...items.slice(0, anchor + 1),
+        ...editItems(edit, gap, items[anchor].trailing),
+        ...items.slice(anchor + 1),
+      ];
+      placed.push(edit);
+    }
+    if (placed.length === 0) break;
+    waiting = waiting.filter((edit) => !placed.includes(edit));
+  }
+  return items === column.items ? column : { ...column, items };
 }
 
 function replaceParagraph(column: FlowColumn, edit: ParagraphEdit): FlowColumn {
@@ -71,8 +154,7 @@ function replaceParagraph(column: FlowColumn, edit: ParagraphEdit): FlowColumn {
   const inkTop = first.content.rect.y;
   const inkBottom = last.content.rect.y + last.content.rect.height;
   const raise = inkTop - top;
-  const originalBottom = top + paragraph.lineCount * paragraph.lineHeight;
-
+  const originalBottom = paragraph.lastBaseline - ascentOf(edit) + paragraph.lineHeight;
   const drop = originalBottom - inkBottom;
 
   const lines = editItems(edit, first.gapBefore - raise, Math.max(0, drop));
@@ -131,6 +213,8 @@ export interface Backdrop {
  * first line and below the last, wherever those have ended up.
  */
 export function editBackdrops(edit: ParagraphEdit, plans: ReadonlyMap<number, PagePlan>): Backdrop[] {
+  // A paragraph that replaced nothing stood on nothing.
+  if (!replacesItems(edit)) return [];
   const { paragraph } = edit;
   const { area, lineHeight } = paragraph;
   const original = paragraph.lineCount;

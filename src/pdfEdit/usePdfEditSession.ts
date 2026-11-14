@@ -9,13 +9,21 @@ import {
   createEdit,
   editBackdrops,
   editFragments,
+  replacesItems,
   type Backdrop,
   type EditFragment,
   type ParagraphEdit,
 } from "./edits.js";
 import type { FlowItem, PageFlow, Placement } from "./flow.js";
 import { useLiveFonts, type LiveFont, type ResolvePdfFont } from "./hostFonts.js";
-import { paragraphsOf, type Paragraph } from "./paragraphs.js";
+import {
+  adoptRuns,
+  mergeParagraphs,
+  paragraphAfter,
+  paragraphsOf,
+  type Paragraph,
+  type StyledRun,
+} from "./paragraphs.js";
 import { analysePage, PageRasters, type FontInfo, type PageAnalysis } from "./pdfPageSource.js";
 import { layoutPage, reflowDocument } from "./reflow.js";
 
@@ -58,6 +66,14 @@ export interface Handoff {
   input: PendingInput | null;
 }
 
+/** A paragraph as the reader meets it: the page's, or the edit that stands in
+ *  for it. An edit the reader made by pressing Enter has no paragraph of the
+ *  page behind it at all. */
+export interface Slot {
+  paragraph: Paragraph;
+  edit: ParagraphEdit | null;
+}
+
 /** Where an item of the page is now. */
 export interface Located {
   page: number;
@@ -73,9 +89,15 @@ export interface PdfEditSession {
   edits: readonly ParagraphEdit[];
   requestAnalysis: (page: number) => void;
   pageView: (page: number) => PageView;
-  /** A page's own paragraphs in reading order, wherever they are drawn now. */
-  paragraphsOf: (page: number) => Paragraph[];
-  editOf: (paragraph: Paragraph) => ParagraphEdit | null;
+  /** A page's paragraphs in reading order, wherever they are drawn now: its
+   *  own, with an edit in place of each one changed, and the paragraphs the
+   *  reader made among them. */
+  slotsOf: (page: number) => Slot[];
+  /** Cut a paragraph in two where the reader pressed Enter. */
+  splitParagraph: (slot: Slot, before: StyledRun[], after: StyledRun[]) => void;
+  /** Join a paragraph to the one before it (-1) or after it (1), given what it
+   *  says now. False when there is nothing there it can be joined to. */
+  joinParagraphs: (slot: Slot, direction: -1 | 1, runs: StyledRun[]) => boolean;
   locate: (itemId: string) => Located | null;
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
   /** What is known of a font used on a page, by the name pdf.js loaded it as. */
@@ -137,10 +159,14 @@ export function usePdfEditSession(
     setAnalyses(new Map());
     setHandoff(null);
     const draft = pdf ? (store?.read(documentKey) ?? null) : null;
+    const kept = usableEdits(draft);
+    const ids = kept.map(() => `edit-${nextEditId.current++}`);
     setEdits(
-      usableEdits(draft).map(({ paragraph, runs }) => ({
-        ...createEdit(`edit-${nextEditId.current++}`, paragraph),
+      kept.map(({ paragraph, runs, after, structural }, index) => ({
+        ...createEdit(ids[index], paragraph),
         runs,
+        after: after === undefined ? null : (ids[after] ?? null),
+        structural: structural ?? false,
       })),
     );
     loadedKey.current = pdf ? documentKey : null;
@@ -153,7 +179,16 @@ export function usePdfEditSession(
     store.save(
       documentKey,
       edits.length > 0
-        ? { version: 1, edits: edits.map(({ paragraph, runs }) => ({ paragraph, runs })) }
+        ? {
+            version: 1,
+            edits: edits.map(({ paragraph, runs, after, structural }) => ({
+              paragraph,
+              runs,
+              structural,
+              // By position: ids are made afresh each time a draft is taken up.
+              ...(after === null ? {} : { after: edits.findIndex((edit) => edit.id === after) }),
+            })),
+          }
         : null,
     );
   }, [edits, documentKey, store]);
@@ -238,27 +273,34 @@ export function usePdfEditSession(
 
     /** Whether one item comes directly after another in the column of the page
      *  they were read from: nothing lies between them there. */
-    const successors = new Map<number, Map<string, string>>();
-    const follows = (previous: FlowItem, next: FlowItem): boolean => {
-      if (previous.content.kind !== "slice" || next.content.kind !== "slice") return false;
-      const page = previous.content.page;
+    const successors = new Map<number, Map<string, string | null>>();
+    const successorsOn = (page: number) => {
       let onPage = successors.get(page);
       if (!onPage) {
         onPage = new Map();
         for (const region of flowOf(page)?.regions ?? []) {
           for (const column of region.columns) {
             column.items.forEach((item, index) => {
-              const after = column.items[index + 1];
-              if (after) onPage!.set(item.id, after.id);
+              onPage!.set(item.id, column.items[index + 1]?.id ?? null);
             });
           }
         }
         successors.set(page, onPage);
       }
-      return onPage.get(previous.id) === next.id;
+      return onPage;
+    };
+    const followsOn = (page: number, previousId: string, nextId: string) =>
+      successorsOn(page).get(previousId) === nextId;
+    const follows = (previous: FlowItem, next: FlowItem): boolean =>
+      previous.content.kind === "slice" &&
+      next.content.kind === "slice" &&
+      followsOn(previous.content.page, previous.id, next.id);
+    const hasItems = (page: number, ids: readonly string[]) => {
+      const onPage = successorsOn(page);
+      return ids.every((id) => onPage.has(id));
     };
 
-    return { flowOf, paragraphsOn, identityPlacements, follows };
+    return { flowOf, paragraphsOn, identityPlacements, follows, followsOn, hasItems };
   }, [analyses, pageSizes, documentPages, lockedAreas]);
 
   const reflow = useMemo(
@@ -284,8 +326,15 @@ export function usePdfEditSession(
   // has it, and laying the edit out anyway would drop text into the wrong
   // place. Such an edit is let go, and said to be.
   useEffect(() => {
+    const unanchored = (edit: ParagraphEdit) =>
+      edit.after !== null && !edits.some((other) => other.id === edit.after);
     const stale = edits.filter((edit) => {
+      // One that follows another edit goes when that edit has gone.
+      if (!replacesItems(edit)) return unanchored(edit);
       if (!analyses.has(edit.paragraph.page)) return false;
+      // Two paragraphs joined say what neither says on the page; what they
+      // need is for every strip they replaced to still be there.
+      if (edit.structural) return !model.hasItems(edit.paragraph.page, edit.paragraph.itemIds);
       const onPage = model
         .paragraphsOn(edit.paragraph.page)
         .find((paragraph) => paragraphKey(paragraph) === paragraphKey(edit.paragraph));
@@ -318,8 +367,22 @@ export function usePdfEditSession(
       return current.map((candidate) => (candidate === edit ? { ...edit, ...patch } : candidate));
     });
   }, []);
+  // With an edit go the paragraphs the reader split off it: they were part of
+  // what it said, and have nowhere to stand once it is the page's again.
   const removeEdit = useCallback<PdfEditSession["removeEdit"]>((id) => {
-    setEdits((current) => current.filter((edit) => edit.id !== id));
+    setEdits((current) => {
+      const gone = new Set([id]);
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const edit of current) {
+          if (edit.after !== null && gone.has(edit.after) && !gone.has(edit.id)) {
+            gone.add(edit.id);
+            grew = true;
+          }
+        }
+      }
+      return current.filter((edit) => !gone.has(edit.id));
+    });
   }, []);
   const clearHandoff = useCallback(() => setHandoff(null), []);
   const discardEdits = useCallback(() => setEdits([]), []);
@@ -343,7 +406,120 @@ export function usePdfEditSession(
 
   return useMemo(() => {
     if (!pdf || !rasters) return null;
-    const editByParagraph = new Map(edits.map((edit) => [paragraphKey(edit.paragraph), edit]));
+    const editByParagraph = new Map(
+      edits.filter(replacesItems).map((edit) => [paragraphKey(edit.paragraph), edit]),
+    );
+    // Strips an edit stands in for. A paragraph joined into the one above it
+    // is still a paragraph of its page, but there is nothing of it left to show.
+    const replaced = new Set(edits.flatMap((edit) => edit.paragraph.itemIds));
+    const followersOf = (id: string) => edits.filter((edit) => edit.after === id);
+
+    const slotsOf = (page: number): Slot[] => {
+      const slots: Slot[] = [];
+      const withFollowers = (edit: ParagraphEdit) => {
+        slots.push({ paragraph: edit.paragraph, edit });
+        followersOf(edit.id).forEach(withFollowers);
+      };
+      const listed = new Set<string>();
+      for (const paragraph of model.paragraphsOn(page)) {
+        const edit = editByParagraph.get(paragraphKey(paragraph));
+        if (edit) {
+          listed.add(edit.id);
+          withFollowers(edit);
+        } else if (!paragraph.itemIds.some((id) => replaced.has(id))) {
+          slots.push({ paragraph, edit: null });
+        }
+      }
+      // An edit holds its paragraph as it was when taken over. Should a later
+      // analysis group that page's lines differently, the edit still stands.
+      for (const edit of edits) {
+        if (replacesItems(edit) && edit.paragraph.page === page && !listed.has(edit.id)) {
+          withFollowers(edit);
+        }
+      }
+      return slots;
+    };
+
+    const sameSlot = (a: Slot, b: Slot) =>
+      a.edit && b.edit ? a.edit.id === b.edit.id : !a.edit && !b.edit && paragraphKey(a.paragraph) === paragraphKey(b.paragraph);
+    const newId = () => `edit-${nextEditId.current++}`;
+    const textLength = (runs: readonly StyledRun[]) =>
+      runs.reduce((total, run) => total + run.text.length, 0);
+
+    const splitParagraph: PdfEditSession["splitParagraph"] = (slot, before, after) => {
+      const first: ParagraphEdit = {
+        ...(slot.edit ?? createEdit(newId(), slot.paragraph)),
+        runs: before,
+        structural: true,
+        revision: (slot.edit?.revision ?? 0) + 1,
+      };
+      const second: ParagraphEdit = {
+        ...createEdit(newId(), paragraphAfter(first.paragraph)),
+        after: first.id,
+        runs: after,
+        structural: true,
+      };
+      setEdits((current) => [
+        ...current
+          .filter((edit) => edit.id !== first.id)
+          // What followed the paragraph follows its second half now.
+          .map((edit) => (edit.after === first.id ? { ...edit, after: second.id } : edit)),
+        first,
+        second,
+      ]);
+      setHandoff({ editId: second.id, anchor: 0, focus: 0, input: null });
+    };
+
+    const joinParagraphs: PdfEditSession["joinParagraphs"] = (slot, direction, runs) => {
+      const slots = slotsOf(slot.paragraph.page);
+      const index = slots.findIndex((candidate) => sameSlot(candidate, slot));
+      const other = slots[index + direction];
+      if (index < 0 || !other) return false;
+      const [first, second] = direction < 0 ? [other, slot] : [slot, other];
+      const runsOf = (side: Slot) => (side === slot ? runs : (side.edit?.runs ?? side.paragraph.runs));
+      const backed = (side: Slot) => side.paragraph.itemIds.length > 0;
+
+      let paragraph: Paragraph;
+      let joined: StyledRun[];
+      if (backed(first) && backed(second)) {
+        // Only what the page set one directly under the other can become one
+        // paragraph: across a column, a page or a figure there is something
+        // between them that a paragraph cannot contain.
+        const lastOfFirst = first.paragraph.itemIds[first.paragraph.itemIds.length - 1];
+        if (!model.followsOn(slot.paragraph.page, lastOfFirst, second.paragraph.itemIds[0])) return false;
+        paragraph = mergeParagraphs(first.paragraph, second.paragraph);
+        joined = [...runsOf(first), ...adoptRuns(paragraph.styles, second.paragraph.styles, runsOf(second))];
+      } else if (backed(second)) {
+        // A paragraph the reader made, joined to the page's paragraph after
+        // it: the result stands where the page's paragraph stood.
+        paragraph = { ...second.paragraph, styles: [...second.paragraph.styles] };
+        joined = [...adoptRuns(paragraph.styles, first.paragraph.styles, runsOf(first)), ...runsOf(second)];
+      } else {
+        paragraph = { ...first.paragraph, styles: [...first.paragraph.styles] };
+        joined = [...runsOf(first), ...adoptRuns(paragraph.styles, second.paragraph.styles, runsOf(second))];
+      }
+
+      const result: ParagraphEdit = {
+        ...createEdit(newId(), paragraph),
+        // Only two paragraphs that both replaced nothing leave one that does.
+        after: backed(first) || backed(second) ? null : (first.edit?.after ?? null),
+        runs: joined,
+        structural: true,
+        lineCount:
+          (first.edit?.lineCount ?? first.paragraph.lineCount) +
+          (second.edit?.lineCount ?? second.paragraph.lineCount),
+      };
+      const absorbed = new Set([first.edit?.id, second.edit?.id]);
+      setEdits((current) => [
+        ...current
+          .filter((edit) => !absorbed.has(edit.id))
+          .map((edit) => (edit.after !== null && absorbed.has(edit.after) ? { ...edit, after: result.id } : edit)),
+        result,
+      ]);
+      const seam = textLength(runsOf(first));
+      setHandoff({ editId: result.id, anchor: seam, focus: seam, input: null });
+      return true;
+    };
     // One list for every page: a page's view is asked for on each of its
     // renders, and must be handed the same array until the layout changes.
     const backdrops = new Map<number, Backdrop[]>();
@@ -382,8 +558,9 @@ export function usePdfEditSession(
         backdrops: backdrops.get(page) ?? NO_BACKDROPS,
       }),
 
-      paragraphsOf: model.paragraphsOn,
-      editOf: (paragraph) => editByParagraph.get(paragraphKey(paragraph)) ?? null,
+      slotsOf,
+      splitParagraph,
+      joinParagraphs,
       locate,
 
       fragmentsOf: (edit) => editFragments(edit, reflow.plans),

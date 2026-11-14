@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { PARAGRAPH_HOST } from "./caretTravel.js";
-import { lineRects, selectText } from "./editableText.js";
-import { estimatedAscent, type EditFragment, type ParagraphEdit } from "./edits.js";
+import { lineRects, selectText, textLength, textOffsetOf } from "./editableText.js";
+import {
+  estimatedAscent,
+  replacesItems,
+  splitRuns,
+  type EditFragment,
+  type ParagraphEdit,
+} from "./edits.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
 import { lineHeightPx, liveFace, paragraphTextStyle } from "./paragraphStyle.js";
 import { readRuns, restyleRuns, styleIndexOf, textOfRuns, writeRuns } from "./styledText.js";
@@ -88,17 +94,56 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
     if (changed) updateEdit(edit.id, { lineCount, ascent });
   }, [edit.id, edit.lineCount, edit.ascent, scale, updateEdit]);
 
-  // The text is the browser's while it is mounted: React writes it once and
-  // reads it back, and never re-renders it under the caret.
+  // The text is the browser's while it is mounted: React writes it when the
+  // paragraph is taken over, and again only when what it says is changed from
+  // outside it -- cut in two, it keeps its first half. It never re-renders it
+  // under the caret for anything the reader typed.
+  useLayoutEffect(() => {
+    if (textRef.current) writeRuns(textRef.current, edit.runs, paragraph, faceOf);
+    // Neither the runs nor the faces are dependencies: both change with what
+    // is typed here and elsewhere, and none of that is a reason to rewrite.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edit.id, edit.revision]);
+
+  // On the way out, what it said is copied back for whoever mounts it next.
   useLayoutEffect(() => {
     const text = textRef.current;
     if (!text) return;
-    writeRuns(text, edit.runs, paragraph, faceOf);
     return () => updateEdit(edit.id, { runs: readRuns(text, paragraph) });
-    // Written once, at mount: neither the runs nor the session they came from
-    // is a dependency, or every keystroke elsewhere would rewrite this text.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   }, [edit.id, updateEdit]);
+
+  // Backspace or Delete at the paragraph's edge changes which paragraphs there
+  // are rather than what one says. A native listener: React's `onBeforeInput`
+  // has no input type to tell a deletion's direction by.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const editRef = useRef(edit);
+  editRef.current = edit;
+  useEffect(() => {
+    const text = textRef.current;
+    if (!text) return;
+    const onBeforeInput = (event: InputEvent) => {
+      const selection = window.getSelection();
+      if (!selection?.anchorNode || selection.rangeCount === 0) return;
+      const slot = { paragraph, edit: editRef.current };
+      if (!selection.isCollapsed || !event.inputType.startsWith("delete")) return;
+      const offset = textOffsetOf(text, selection.anchorNode, selection.anchorOffset);
+      const direction =
+        event.inputType.endsWith("Backward") && offset === 0
+          ? -1
+          : event.inputType.endsWith("Forward") && offset >= textLength(text)
+            ? 1
+            : null;
+      if (direction === null) return;
+      // Nothing of this paragraph is deleted either way; whether the break
+      // beside it goes depends on what is on the other side.
+      event.preventDefault();
+      sessionRef.current.joinParagraphs(slot, direction, readRuns(text, paragraph));
+    };
+    text.addEventListener("beforeinput", onBeforeInput);
+    return () => text.removeEventListener("beforeinput", onBeforeInput);
+  }, [paragraph]);
 
   // What the paragraph says is the DOM's while it is mounted, and is copied
   // into the session when typing pauses -- which is when it reaches the
@@ -216,12 +261,32 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
         onBlur={(event) => {
           const runs = readRuns(event.currentTarget, paragraph);
           // Back to what the page says: give the paragraph back to the page,
-          // which sets it better than this can.
-          if (textOfRuns(runs) === paragraph.text) removeEdit(edit.id);
+          // which sets it better than this can. Not one that is half of a
+          // split or the whole of a join: its being here is the change.
+          if (!edit.structural && textOfRuns(runs) === paragraph.text) removeEdit(edit.id);
           else updateEdit(edit.id, { runs });
         }}
         onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
+          // Enter makes two paragraphs of this one. Caught as a key because
+          // plain-text editing reports Enter and Shift+Enter as the same
+          // input; with Shift it is left to be a line break inside the
+          // paragraph, and during a composition it belongs to the input method.
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            const range = window.getSelection()?.getRangeAt(0);
+            if (!range) return;
+            const text = event.currentTarget;
+            const runs = readRuns(text, paragraph);
+            session.splitParagraph(
+              { paragraph, edit },
+              splitRuns(runs, textOffsetOf(text, range.startContainer, range.startOffset))[0],
+              splitRuns(runs, textOffsetOf(text, range.endContainer, range.endOffset))[1],
+            );
+            return;
+          }
+          // Escape gives a paragraph back to the page. One the reader made
+          // has no page to go back to.
+          if (event.key !== "Escape" || !replacesItems(edit)) return;
           event.preventDefault();
           removeEdit(edit.id);
         }}
