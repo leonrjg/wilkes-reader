@@ -20,7 +20,8 @@ function column(page: number, name: string, x: number, count: number, top: numbe
       rect: { x, y: top + index * (LINE + GAP), width: 200, height: LINE },
     },
   }));
-  return { x, width: 200, lead: 0, items };
+  // Room for twenty lines, as `page` below has it.
+  return { x, width: 200, lead: 0, items, room: (20 - count) * (LINE + GAP), opens: GAP + LINE };
 }
 
 /** A page whose body runs from 100 to 340: room for exactly twenty lines. */
@@ -31,7 +32,7 @@ function page(number: number, columns: FlowColumn[], lead = 0): PageFlow {
     height: 400,
     body: { top: 100, bottom: 340 - GAP },
     lead,
-    regions: columns.length > 0 ? [{ gapBefore: GAP, columns }] : [],
+    regions: columns.length > 0 ? [{ gapBefore: GAP, depth: null, columns }] : [],
     fixed: [],
     background: "white",
   };
@@ -151,6 +152,77 @@ describe("reflowDocument", () => {
     const reflow = reflowDocument((n) => applyEdits(flows(pages)(n), [edit]), [1], 5);
     expect([...reflow.plans.keys()]).toEqual([1, 2, 3, 4]);
     expect(reflow.plans.get(4)!.placements[0].item.id).toBe("3:a:19");
+  });
+
+  it("takes the head of the next page into the room a shorter paragraph leaves", () => {
+    const pages = [1, 2].map((n) => page(n, [column(n, "a", 50, 20, 100)]));
+    pages.push(page(3, [column(3, "a", 50, 5, 100)]));
+    // Three lines become one: room for two more at the foot of the page.
+    const edit = edited(pages[0], 2, 5, 1);
+    const reflow = reflowDocument((n) => applyEdits(flows(pages)(n), [edit]), [1], 3);
+
+    const onFirst = reflow.plans.get(1)!.placements;
+    expect(onFirst.slice(-2).map((p) => p.item.id)).toEqual(["2:a:0", "2:a:1"]);
+    expect(onFirst[onFirst.length - 1].y).toBe(100 + 19 * 12);
+    // The second page starts with what is left of it, and takes from the third.
+    const onSecond = reflow.plans.get(2)!.placements;
+    expect(onSecond[0]).toMatchObject({ item: { id: "2:a:2" }, y: 100 });
+    expect(onSecond.slice(-2).map((p) => p.item.id)).toEqual(["3:a:0", "3:a:1"]);
+    expect(reflow.plans.get(3)!.placements.map((p) => p.item.id)).toEqual(["3:a:2", "3:a:3", "3:a:4"]);
+  });
+
+  it("takes nothing back across a break the file made with room to spare", () => {
+    const first = page(1, [column(1, "a", 50, 10, 100)]);
+    const second = page(2, [column(2, "a", 50, 20, 100)]);
+    const edit = edited(first, 2, 5, 1);
+    const reflow = reflowDocument((n) => applyEdits(flows([first, second])(n), [edit]), [1], 2);
+    expect([...reflow.plans.keys()]).toEqual([1]);
+  });
+
+  it("takes nothing from a page that starts lower than its body", () => {
+    const first = page(1, [column(1, "a", 50, 20, 100)]);
+    const second = page(2, [column(2, "a", 50, 10, 160)], 60);
+    const edit = edited(first, 2, 5, 1);
+    const reflow = reflowDocument((n) => applyEdits(flows([first, second])(n), [edit]), [1], 2);
+    expect([...reflow.plans.keys()]).toEqual([1]);
+  });
+
+  it("asks for the page it would take from, as far as the horizon", () => {
+    const first = page(1, [column(1, "a", 50, 20, 100)]);
+    const edit = edited(first, 2, 5, 1);
+    const flowOf = (n: number) => (n === 1 ? applyEdits(first, [edit]) : null);
+    expect(reflowDocument(flowOf, [1], 3, 2).missing).toEqual([2]);
+    expect(reflowDocument(flowOf, [1], 3, 1).deferred).toEqual([2]);
+  });
+
+  it("refills a column from the one beside it", () => {
+    const flow = page(1, [column(1, "l", 50, 20, 100), column(1, "r", 300, 20, 100)]);
+    const edit = edited(flow, 2, 4, 1);
+    const reflow = reflowDocument((n) => applyEdits(flows([flow])(n), [edit]), [1], 1);
+    const moved = reflow.plans.get(1)!.placements.find((p) => p.item.id === "1:r:0");
+    expect(moved).toMatchObject({ x: 50, y: 100 + 19 * 12 });
+    expect(reflow.plans.get(1)!.placements.find((p) => p.item.id === "1:r:1")).toMatchObject({ x: 300, y: 100 });
+  });
+
+  it("leaves columns the file balanced as they are", () => {
+    // Ten lines a side on a page with room for twenty: the break between the
+    // columns was not for want of room.
+    const flow = page(1, [column(1, "l", 50, 10, 100), column(1, "r", 300, 10, 100)]);
+    const edit = edited(flow, 2, 4, 1);
+    const reflow = reflowDocument((n) => applyEdits(flows([flow])(n), [edit]), [1], 1);
+    expect(reflow.plans.get(1)!.placements.find((p) => p.item.id === "1:r:0")).toMatchObject({ x: 300, y: 100 });
+  });
+
+  it("refills no further than the file made the region tall", () => {
+    // Columns that stop where something under them starts: full, at ten lines.
+    const bounded = (name: string, x: number) => ({ ...column(1, name, x, 10, 100), room: 0 });
+    const flow = page(1, [bounded("l", 50), bounded("r", 300)]);
+    flow.regions[0].depth = 10 * 12 - GAP;
+    const edit = edited(flow, 2, 5, 1);
+    const reflow = reflowDocument((n) => applyEdits(flows([flow])(n), [edit]), [1], 1);
+    const left = reflow.plans.get(1)!.placements.filter((p) => p.x === 50);
+    expect(left.slice(-2).map((p) => p.item.id)).toEqual(["1:r:0", "1:r:1"]);
+    expect(left[left.length - 1].y).toBe(100 + 9 * 12);
   });
 
   it("appends a page when the last one overflows", () => {

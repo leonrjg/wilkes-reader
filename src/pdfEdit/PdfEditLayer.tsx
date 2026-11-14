@@ -43,10 +43,14 @@ export default function PdfEditLayer({ session, pages, geometryOf }: PdfEditLaye
   const furthest = pages.length > 0 ? Math.max(...pages) : 0;
   useEffect(() => lookAhead(furthest + LOOK_AHEAD_PAGES), [lookAhead, furthest]);
 
-  // A page's paragraphs can have been pushed onto the page after it, so what
-  // is drawn on the first page in view may belong to the one before.
+  // A page's paragraphs can have been pushed onto the page after it or taken
+  // onto the one before, so what is drawn at either end of what is in view may
+  // belong to the page beyond it.
   const inView = new Set(pages);
-  if (pages.length > 0) inView.add(Math.min(...pages) - 1);
+  if (pages.length > 0) {
+    inView.add(Math.min(...pages) - 1);
+    inView.add(Math.max(...pages) + 1);
+  }
   // Edited paragraphs stay mounted wherever they are: their text and their
   // undo history live in the DOM.
   const edited = new Set(session.edits.map((edit) => edit.paragraph.page));

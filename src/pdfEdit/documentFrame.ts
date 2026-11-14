@@ -95,35 +95,24 @@ export function buildPageFlow(
   locked: readonly BoundingBox[] = [],
 ): PageFlow {
   const fixed: BoundingBox[] = [];
-  const regions: FlowRegion[] = [];
-  let previous: LayoutRegion | null = null;
-  let first: LayoutRegion | null = null;
+  const flowing: Array<{ region: LayoutRegion; index: number }> = [];
   let headLimit = 0;
   let footLimit = layout.height;
 
-  for (const [regionIndex, region] of layout.regions.entries()) {
-    if (region.role !== "body" && frame.isFurniture(page, region.role)) {
-      if (region.role === "head") {
-        headLimit = region.bottom + FIXED_MARGIN;
-        fixed.push({ x: 0, y: 0, width: layout.width, height: headLimit });
-      } else {
-        footLimit = region.top - FIXED_MARGIN;
-        fixed.push({ x: 0, y: footLimit, width: layout.width, height: layout.height - footLimit });
-      }
-      continue;
+  for (const [index, region] of layout.regions.entries()) {
+    if (region.role === "body" || !frame.isFurniture(page, region.role)) {
+      flowing.push({ region, index });
+    } else if (region.role === "head") {
+      headLimit = region.bottom + FIXED_MARGIN;
+      fixed.push({ x: 0, y: 0, width: layout.width, height: headLimit });
+    } else {
+      footLimit = region.top - FIXED_MARGIN;
+      fixed.push({ x: 0, y: footLimit, width: layout.width, height: layout.height - footLimit });
     }
-    regions.push({
-      gapBefore: previous ? region.top - previous.bottom : layout.lineGap,
-      columns: region.columns.map((column, columnIndex) =>
-        flowColumn(page, `${page}:${regionIndex}:${columnIndex}`, region, column, layout.lineGap, locked),
-      ),
-    });
-    first ??= region;
-    previous = region;
   }
 
-  const ownTop = first?.top;
-  const ownBottom = previous?.bottom;
+  const ownTop = flowing[0]?.region.top;
+  const ownBottom = flowing[flowing.length - 1]?.region.bottom;
   const shared = frame.body ?? { top: layout.height * 0.1, bottom: layout.height * 0.9 };
   // The shared frame, kept off this page's own furniture and never tighter
   // than this page's own content: a page always holds what it already held.
@@ -131,6 +120,21 @@ export function buildPageFlow(
     top: Math.min(ownTop ?? Infinity, Math.max(shared.top, headLimit)),
     bottom: Math.max(ownBottom ?? -Infinity, Math.min(shared.bottom, footLimit)),
   };
+
+  const regions: FlowRegion[] = flowing.map(({ region, index }, position) => {
+    const previous = flowing[position - 1]?.region;
+    // Every region but the last stops where the one under it starts; the last
+    // could have run to the foot of the body.
+    const last = position === flowing.length - 1;
+    const stop = last ? body.bottom : region.bottom;
+    return {
+      gapBefore: previous ? region.top - previous.bottom : layout.lineGap,
+      depth: last ? null : region.bottom - region.top,
+      columns: region.columns.map((column, columnIndex) =>
+        flowColumn(page, `${page}:${index}:${columnIndex}`, region, column, layout.lineGap, locked, stop),
+      ),
+    };
+  });
 
   return {
     page,
@@ -151,6 +155,8 @@ function flowColumn(
   column: LayoutRegion["columns"][number],
   lineGap: number,
   locked: readonly BoundingBox[],
+  /** How far down the page the column could have run. */
+  stop: number,
 ): FlowColumn {
   const pieces = lockedTogether(column, locked);
   const gaps = pieces.slice(1).map((piece, index) => piece.top - pieces[index].bottom);
@@ -174,6 +180,8 @@ function flowColumn(
     width: column.width,
     lead: pieces.length > 0 ? pieces[0].top - region.top : 0,
     items,
+    room: stop - (pieces[pieces.length - 1]?.bottom ?? region.top),
+    opens: items.length > 0 ? items[0].gapBefore + items[0].height : 0,
   };
 }
 

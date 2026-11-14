@@ -1,4 +1,4 @@
-import type { FlowItem, FlowRegion, PageFlow, Placement } from "./flow.js";
+import type { FlowColumn, FlowItem, FlowRegion, PageFlow, Placement } from "./flow.js";
 
 /**
  * Lays a document's pages out again after their content changed height.
@@ -11,14 +11,19 @@ import type { FlowItem, FlowRegion, PageFlow, Placement } from "./flow.js";
  *      column, it goes to the next page, ahead of that page's own content.
  *   3. Everything below a region that overflowed leaves the page with it, in
  *      reading order.
- *   4. Content never moves to an earlier page. A page that ends short -- the
- *      last page of a chapter -- is where a cascade stops, and it is not
- *      refilled from the page after it, because nothing in the file says
- *      whether that break was forced.
+ *   4. A column that ends with room to spare takes the items that follow it --
+ *      from the next column, or from the head of the next page -- but only
+ *      over a break the file made for want of room: one where the item after
+ *      it would not have fit under the item before. A break the file made with
+ *      room to spare was put there on purpose -- the end of a chapter, a
+ *      balanced pair of columns -- and nothing is taken back across it.
+ *   5. What is taken back never makes a region taller than the file made it.
  *
- * Laying out a page nothing was pushed onto, whose content did not change,
- * returns every item to where the file drew it. That identity is what lets an
- * untouched page be drawn straight from its raster.
+ * Laying out a page nothing was pushed onto or taken from, whose content did
+ * not change, returns every item to where the file drew it: a full column has
+ * no room for the item after it, and that is the only thing rule 4 would give
+ * it. That identity is what lets an untouched page be drawn straight from its
+ * raster.
  */
 
 export interface PagePlan {
@@ -70,7 +75,9 @@ export function reflowDocument(
   for (const origin of [...new Set(origins)].sort((a, b) => a - b)) {
     if (plans.has(origin)) continue;
     let carried: FlowRegion[] = [];
-    for (let page = origin; page === origin || carried.length > 0; page++) {
+    // How many items at the head of this page the page before it took.
+    let taken = 0;
+    for (let page = origin; page === origin || carried.length > 0 || taken > 0; page++) {
       if (page > documentPages + MAX_APPENDED_PAGES) {
         throw new Error(`PDF reflow did not terminate: still carrying content at page ${page}`);
       }
@@ -81,31 +88,106 @@ export function reflowDocument(
         (page === origin || page <= horizon ? missing : deferred).push(page);
         break;
       }
-      const { placements, overflow } = layoutPage(flow, carried);
-      plans.set(page, { page, placements });
+      const own = taken > 0 ? withoutHead(flow.regions, taken) : flow.regions;
+      let laid = layoutPage(flow, carried, own);
+      taken = 0;
+      // A page that ends with more room than the file left it would take the
+      // head of the next -- if that is known, and if the break is one to cross.
+      if (laid.foot && page < documentPages) {
+        const next = flowOf(page + 1);
+        if (!next) {
+          (page + 1 <= horizon ? missing : deferred).push(page + 1);
+        } else {
+          const head = headOf(next, laid.foot);
+          if (head.length > 0) {
+            laid = layoutPage(flow, carried, own, head);
+            taken = laid.taken;
+          }
+        }
+      }
+      plans.set(page, { page, placements: laid.placements });
       lastPage = Math.max(lastPage, page);
-      carried = overflow;
+      carried = laid.overflow;
     }
   }
 
   return { plans, lastPage, missing, deferred };
 }
 
-/** One page: what stays on it, and what leaves for the next. */
+/** A page's regions without the first `count` items of its first column. */
+function withoutHead(regions: FlowRegion[], count: number): FlowRegion[] {
+  const [first, ...rest] = regions;
+  if (!first) return regions;
+  const columns = first.columns.map((column, index) =>
+    index === 0 ? { ...column, items: column.items.slice(count) } : column,
+  );
+  return [{ ...first, columns }, ...rest];
+}
+
+/** The items at the head of a page that the foot of the page before it may
+ *  take: those of its first column, when that column continues the one the
+ *  page before ended in. */
+function headOf(next: PageFlow, foot: FlowRegion): FlowItem[] {
+  const first = next.regions[0];
+  const column = first?.columns[0];
+  const opening = column?.items[0];
+  if (!first || !column || !opening || !sameShape(foot, first)) return [];
+  // A page that starts lower than its body does is the start of something.
+  if (next.lead > opening.height) return [];
+  return runsOn(foot.columns[foot.columns.length - 1], column) ? column.items : [];
+}
+
+/** Whether the file broke between two columns for want of room: the second's
+ *  first item would not have fit under the first's last. */
+function runsOn(column: FlowColumn, next: FlowColumn): boolean {
+  return next.opens > column.room + EPSILON;
+}
+
+export interface PageLayoutResult {
+  placements: Placement[];
+  /** What the page could not hold, for the next. */
+  overflow: FlowRegion[];
+  /** How many of the items offered from the next page it took. */
+  taken: number;
+  /** The page's own last region, when its last column ended with more room
+   *  than the file left it: the page would take more. Null otherwise. */
+  foot: FlowRegion | null;
+}
+
+/**
+ * One page: what stays on it, and what leaves for the next.
+ *
+ * @param carried   What the page before could not hold.
+ * @param own       The page's regions, less whatever the page before took.
+ * @param following Items at the head of the next page that this one's foot
+ *                  may take, in order.
+ */
 export function layoutPage(
   flow: PageFlow,
   carried: FlowRegion[],
-): { placements: Placement[]; overflow: FlowRegion[] } {
-  const regions = joinCarried(carried, flow.regions);
+  own: FlowRegion[] = flow.regions,
+  following: FlowItem[] = [],
+): PageLayoutResult {
+  // A region emptied by the page before is not there to be laid out.
+  const regions = joinCarried(carried, own.filter(hasItems));
+  const endsInOwn = own.length > 0 && hasItems(own[own.length - 1]);
   const placements: Placement[] = [];
   let cursor = flow.body.top + (carried.length > 0 ? 0 : flow.lead);
+  let taken = 0;
+  let foot: FlowRegion | null = null;
 
   for (let index = 0; index < regions.length; index++) {
     const region = regions[index];
     const top = index === 0 ? cursor : cursor + region.gapBefore;
+    const isFoot = endsInOwn && index === regions.length - 1;
     // A page must take at least one item, or a single item taller than the
     // body would be carried forever.
-    const filled = fillRegion(region, flow.body.bottom - top, placements.length === 0);
+    const filled = fillRegion(
+      region,
+      flow.body.bottom - top,
+      placements.length === 0,
+      isFoot ? following : [],
+    );
     for (const placed of filled.placed) {
       const column = region.columns[placed.column];
       placements.push({
@@ -117,12 +199,19 @@ export function layoutPage(
     }
     cursor = top + filled.height;
     if (filled.rest) {
-      return { placements, overflow: [filled.rest, ...regions.slice(index + 1)] };
+      return { placements, overflow: [filled.rest, ...regions.slice(index + 1)], taken: 0, foot: null };
+    }
+    if (isFoot) {
+      taken = filled.taken;
+      const last = region.columns[region.columns.length - 1];
+      if (filled.spare > last.room + EPSILON) foot = region;
     }
   }
 
-  return { placements, overflow: [] };
+  return { placements, overflow: [], taken, foot };
 }
+
+const hasItems = (region: FlowRegion) => region.columns.some((column) => column.items.length > 0);
 
 interface PlacedItem {
   item: FlowItem;
@@ -131,35 +220,65 @@ interface PlacedItem {
   offset: number;
 }
 
-/** Fill a region's columns in order, each taking what the one before it could
- *  not hold. What the last column cannot hold is the region's remainder. */
+/**
+ * Fill a region's columns in order. Each takes what the one before it could
+ * not hold, then its own; one that still has room takes what follows it, over
+ * a break the file made for want of room. What the last column cannot hold is
+ * the region's remainder.
+ *
+ * @param following What the last column may take once it has room: the head
+ *                  of the next page.
+ */
 function fillRegion(
   region: FlowRegion,
   limit: number,
   mustPlaceFirst: boolean,
-): { placed: PlacedItem[]; height: number; rest: FlowRegion | null } {
+  following: FlowItem[],
+): { placed: PlacedItem[]; height: number; rest: FlowRegion | null; taken: number; spare: number } {
   const placed: PlacedItem[] = [];
+  // What each column still holds: a column can lose its head to the one before.
+  const waiting = region.columns.map((column) => column.items);
+  // What is taken back never makes the region taller than the file made it.
+  const refillLimit = Math.min(limit, region.depth ?? Infinity);
   let displaced: FlowItem[] = [];
   let height = 0;
+  let taken = 0;
+  let spare = 0;
 
   region.columns.forEach((column, columnIndex) => {
-    const items = displaced.length > 0 ? [...displaced, ...column.items] : column.items;
+    const items = displaced.length > 0 ? [...displaced, ...waiting[columnIndex]] : waiting[columnIndex];
     let cursor = displaced.length > 0 ? 0 : column.lead;
-    let taken = 0;
-    for (; taken < items.length; taken++) {
-      const item = items[taken];
-      const itemTop = taken === 0 ? cursor : cursor + item.gapBefore;
-      const forced = mustPlaceFirst && placed.length === 0;
-      if (itemTop + item.height - item.trailing > limit + EPSILON && !forced) break;
+    let held = 0;
+    const place = (item: FlowItem, within: number, forced: boolean): boolean => {
+      const itemTop = held === 0 ? cursor : cursor + item.gapBefore;
+      if (itemTop + item.height - item.trailing > within + EPSILON && !forced) return false;
       placed.push({ item, column: columnIndex, offset: itemTop });
       cursor = itemTop + item.height;
+      held++;
+      return true;
+    };
+
+    let own = 0;
+    while (own < items.length && place(items[own], limit, mustPlaceFirst && placed.length === 0)) own++;
+    displaced = items.slice(own);
+
+    if (displaced.length === 0) {
+      const next = region.columns[columnIndex + 1];
+      if (!next) {
+        while (taken < following.length && place(following[taken], refillLimit, false)) taken++;
+        spare = refillLimit - cursor;
+      } else if (runsOn(column, next)) {
+        const source = waiting[columnIndex + 1];
+        let pulled = 0;
+        while (pulled < source.length && place(source[pulled], refillLimit, false)) pulled++;
+        waiting[columnIndex + 1] = source.slice(pulled);
+      }
     }
-    displaced = items.slice(taken);
-    if (taken > 0) height = Math.max(height, cursor);
+    if (held > 0) height = Math.max(height, cursor);
   });
 
-  if (displaced.length === 0) return { placed, height, rest: null };
-  return { placed, height, rest: tailRegion(region, displaced) };
+  if (displaced.length === 0) return { placed, height, rest: null, taken, spare };
+  return { placed, height, rest: tailRegion(region, displaced), taken: 0, spare: 0 };
 }
 
 /** What a region could not hold, as a region of the same shape whose first
@@ -167,6 +286,7 @@ function fillRegion(
 function tailRegion(region: FlowRegion, items: FlowItem[]): FlowRegion {
   return {
     gapBefore: region.gapBefore,
+    depth: region.depth,
     columns: region.columns.map((column, index) => ({
       ...column,
       lead: 0,
@@ -187,6 +307,7 @@ function joinCarried(carried: FlowRegion[], own: FlowRegion[]): FlowRegion[] {
 
   const joined: FlowRegion = {
     gapBefore: tail.gapBefore,
+    depth: first.depth,
     columns: first.columns.map((column, index) =>
       index === 0
         ? { ...column, lead: 0, items: [...tail.columns[0].items, ...column.items] }

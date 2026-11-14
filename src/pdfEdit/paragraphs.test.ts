@@ -27,7 +27,7 @@ function flowOf(lines: Array<ReturnType<typeof line>>, gaps: number[] = []): Pag
     height: 400,
     body: { top: 40, bottom: 360 },
     lead: 0,
-    regions: [{ gapBefore: 0, columns: [{ x: LEFT, width: RIGHT - LEFT, lead: 0, items }] }],
+    regions: [{ gapBefore: 0, depth: null, columns: [{ x: LEFT, width: RIGHT - LEFT, lead: 0, items, room: 0, opens: 0 }] }],
     fixed: [],
     background: "white",
   };

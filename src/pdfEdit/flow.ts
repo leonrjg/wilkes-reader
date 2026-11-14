@@ -49,11 +49,21 @@ export interface FlowColumn {
    *  displaced content arrives ahead of it. */
   lead: number;
   items: FlowItem[];
+  /** How much more the file could have set under the column's last item
+   *  before the column had to stop. A statement about the file, which stays
+   *  what it was however the column's items change. */
+  room: number;
+  /** What the column's first item needed to be set under another: its gap and
+   *  its height. Also as the file had it. */
+  opens: number;
 }
 
 export interface FlowRegion {
   /** Space above this region when another region precedes it on the page. */
   gapBefore: number;
+  /** How tall the file made the region, where something under it on the page
+   *  says so. Null for a page's last region, which runs to the body's foot. */
+  depth: number | null;
   columns: FlowColumn[];
 }
 
