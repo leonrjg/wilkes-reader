@@ -1,6 +1,7 @@
 import { AnnotationMode, OPS, Util } from "../pdfjs.js";
 import type { PDFDocumentProxy, PDFPageProxy } from "../pdfjs.js";
 import { installReadableStreamAsyncIterator } from "../readableStreamAsyncIterator.js";
+import { faceFromName } from "./fontNames.js";
 import type { PdfFontRequest } from "./hostFonts.js";
 import { inkGridFromImage } from "./inkGrid.js";
 import { layoutFromInk, type PageLayout } from "./pageLayout.js";
@@ -12,14 +13,18 @@ import type { TextRun } from "./paragraphs.js";
  * the reflow can be reasoned about -- and tested -- as plain data.
  */
 
-/** What is known of a font a page uses: its own name in the file, its weight
- *  and slant, and the generic family it belongs to. The same four things a
- *  host is asked to find a whole font by. */
-export type FontInfo = PdfFontRequest;
+/** What is known of a font a document uses: what a host is asked to find a
+ *  whole font by, and the family pdf.js registered its embedded face as. That
+ *  family is made up when the document is opened and is good until it is
+ *  closed; nothing kept longer may name a font by it. */
+export interface FontInfo extends PdfFontRequest {
+  face: string;
+}
 
 export interface PageAnalysis {
   layout: PageLayout;
   runs: TextRun[];
+  /** The fonts the page's runs are in, by the name each run has for its. */
   fonts: Map<string, FontInfo>;
 }
 
@@ -39,14 +44,22 @@ const TEXT_OPERATIONS: ReadonlySet<number> = new Set([
   OPS.nextLineSetSpacingShowText,
 ]);
 
-/** The operations of a page that draw text, by their place in its list. */
-async function textOperations(page: PDFPageProxy): Promise<Set<number>> {
-  const { fnArray } = await page.getOperatorList();
-  const indices = new Set<number>();
-  fnArray.forEach((operation, index) => {
-    if (TEXT_OPERATIONS.has(operation)) indices.add(index);
-  });
-  return indices;
+/** The list of operations a render walks. pdf.js keeps it on the task and
+ *  offers no other way to it: `getOperatorList()` answers with a differently
+ *  optimised list, whose places are not the ones a render's filter is asked
+ *  about -- a page set one glyph at a time has its text operations merged in
+ *  one list and not in the other. */
+interface WalkedOperations {
+  fnArray: number[];
+}
+
+function operationsOf(task: unknown): WalkedOperations {
+  const list = (task as { _internalRenderTask?: { operatorList?: WalkedOperations } })
+    ._internalRenderTask?.operatorList;
+  if (!list || !Array.isArray(list.fnArray)) {
+    throw new Error("PDF edit: this build of pdf.js does not expose the operations a render walks");
+  }
+  return list;
 }
 
 async function renderPage(
@@ -61,17 +74,27 @@ async function renderPage(
   canvas.height = Math.floor(viewport.height);
   const context = canvas.getContext("2d", { alpha: false, willReadFrequently: readBack });
   if (!context) throw new Error("PDF edit: no 2D canvas context is available");
-  const text = layer === "paper" ? await textOperations(page) : null;
   // The same choices `PdfPageCanvas` makes, for the same reasons: an opaque
   // white sheet, with annotation appearances baked in.
-  await page.render({
+  let walked: WalkedOperations | null = null;
+  const task = page.render({
     annotationMode: AnnotationMode.ENABLE,
     canvas,
     canvasContext: context,
     viewport,
     background: "white",
-    ...(text ? { operationsFilter: (index: number) => !text.has(index) } : {}),
-  }).promise;
+    // The paper is the page without the operations that draw text. Asked of
+    // the list being walked, as it is walked: the list arrives in pieces.
+    ...(layer === "paper"
+      ? {
+          operationsFilter: (index: number) => {
+            walked ??= operationsOf(task);
+            return !TEXT_OPERATIONS.has(walked.fnArray[index]);
+          },
+        }
+      : {}),
+  });
+  await task.promise;
   return { canvas, context };
 }
 
@@ -89,19 +112,28 @@ export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Pr
   const toPage = page.getViewport({ scale: 1 }).transform;
   const runs: TextRun[] = [];
   const fonts = new Map<string, FontInfo>();
+  // pdf.js's name for each font, to the name the runs are given for it.
+  const named = new Map<string, string>();
   for (const item of content.items) {
     if (!("str" in item) || item.str.length === 0) continue;
     const transform = Util.transform(toPage, item.transform);
     // Text set at an angle is not a line of a paragraph; leave it to the page.
     if (Math.abs(transform[1]) > 0.01 * Math.abs(transform[0])) continue;
     const fontSize = Math.hypot(transform[2], transform[3]);
+    let fontName = named.get(item.fontName);
+    if (fontName === undefined) {
+      const font = fontOf(page, item.fontName, content.styles[item.fontName]?.fontFamily);
+      fontName = font.name;
+      named.set(item.fontName, fontName);
+      if (!fonts.has(fontName)) fonts.set(fontName, font.info);
+    }
     runs.push({
       text: item.str,
       x: transform[4],
       width: item.width,
       baseline: transform[5],
       fontSize,
-      fontName: item.fontName,
+      fontName,
       color: inkColour(image, {
         x: transform[4] * ANALYSIS_SCALE,
         y: (transform[5] - fontSize * 0.75) * ANALYSIS_SCALE,
@@ -109,9 +141,6 @@ export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Pr
         height: fontSize * 0.95 * ANALYSIS_SCALE,
       }),
     });
-    if (!fonts.has(item.fontName)) {
-      fonts.set(item.fontName, fontInfo(page, item.fontName, content.styles[item.fontName]?.fontFamily));
-    }
   }
   return { layout, runs, fonts };
 }
@@ -152,20 +181,40 @@ interface LoadedFont {
   italic?: boolean;
 }
 
-/** pdf.js registers an embedded font under a generated name and with no weight
- *  or style, so the only record of either is the font's own PostScript name. */
-function fontInfo(page: PDFPageProxy, fontName: string, fallback: string | undefined): FontInfo {
-  const loaded = page.commonObjs.has(fontName)
-    ? (page.commonObjs.get(fontName) as LoadedFont | null)
-    : null;
+/** A font of a page: the name its runs are given for it, and what is known of
+ *  it.
+ *
+ *  The name is the one the file gives the font, subset tag and all, because
+ *  that is the same every time the file is opened -- which the name pdf.js
+ *  registers the embedded face under is not: it counts fonts in the order
+ *  pages happened to be read. An edit kept from one session to the next names
+ *  its fonts, and so does a paragraph joined to one from another page. Only a
+ *  font the file leaves nameless is known by pdf.js's name for it.
+ *
+ *  What pdf.js reports of a font's weight, slant and kind comes from the flags
+ *  the file's producer set, which say less, and less reliably, than the
+ *  font's own PostScript name. */
+function fontOf(
+  page: PDFPageProxy,
+  face: string,
+  fallback: string | undefined,
+): { name: string; info: FontInfo } {
+  const loaded = page.commonObjs.has(face) ? (page.commonObjs.get(face) as LoadedFont | null) : null;
+  const fileName = loaded?.name ?? "";
   // A subset is named `ABCDEF+RealName`.
-  const name = (loaded?.name ?? "").replace(/^[A-Z]{6}\+/, "");
+  const name = fileName.replace(/^[A-Z]{6}\+/, "");
+  const named = faceFromName(name);
   const family = loaded?.fallbackName ?? fallback ?? "serif";
   return {
-    name,
-    generic: family.includes("mono") ? "monospace" : family.includes("sans") ? "sans-serif" : "serif",
-    bold: Boolean(loaded?.bold || loaded?.black) || /bold|black|heavy|semibold|demi|^cmbx/i.test(name),
-    italic: Boolean(loaded?.italic) || /italic|oblique|^cm(?:ti|sl)/i.test(name),
+    name: fileName || face,
+    info: {
+      name,
+      face,
+      generic:
+        named.generic ?? (family.includes("mono") ? "monospace" : family.includes("sans") ? "sans-serif" : "serif"),
+      bold: Boolean(loaded?.bold || loaded?.black) || named.bold,
+      italic: Boolean(loaded?.italic) || named.italic,
+    },
   };
 }
 

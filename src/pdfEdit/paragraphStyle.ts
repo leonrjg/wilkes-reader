@@ -31,10 +31,11 @@ export function paragraphTextStyle(paragraph: Paragraph, face: FaceStyle, scale:
 /** A font as the page draws it: the embedded face pdf.js registered. It is the
  *  face the page's own glyphs are in, so a caret laid over the page in it
  *  falls between the letters it appears to be between. A subset lacks glyphs;
- *  the generic family covers what it lacks. */
-export function pageFace(fontName: string, font: FontInfo): FaceStyle {
+ *  the generic family covers what it lacks -- and all of it, for a font of a
+ *  page nothing is known about yet. */
+export function pageFace(font: FontInfo): FaceStyle {
   return {
-    fontFamily: `"${fontName}", ${font.generic}`,
+    fontFamily: font.face ? `"${font.face}", ${font.generic}` : font.generic,
     fontWeight: font.bold ? "bold" : "normal",
     fontStyle: font.italic ? "italic" : "normal",
   };
@@ -44,7 +45,7 @@ export function pageFace(fontName: string, font: FontInfo): FaceStyle {
  *  the file it will also save with. It is already the bold or the italic, so
  *  nothing is asked of the browser on top. Until the host has answered -- or
  *  when there is no host to ask -- it is the page's face. */
-export function liveFace(fontName: string, font: FontInfo, live: LiveFont | null): FaceStyle {
-  if (!live) return pageFace(fontName, font);
+export function liveFace(font: FontInfo, live: LiveFont | null): FaceStyle {
+  if (!live) return pageFace(font);
   return { fontFamily: `"${live.family}", ${font.generic}`, fontWeight: "normal", fontStyle: "normal" };
 }

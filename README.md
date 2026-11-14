@@ -146,6 +146,7 @@ It lives in `src/pdfEdit/`, in layers that each know about one thing:
 | `relocation.ts` | Where an area or a point of the original page is drawn now |
 | `editExport.ts`, `typeset.ts` | The edited document as areas and text, read back off the screen |
 | `editStore.ts`, `hostFonts.ts` | What crosses to the host: unsaved edits, and fonts |
+| `fontNames.ts` | What a font's PostScript name says of it, which a file's flags often do not: serif or sans, bold, italic |
 | `pdfPageSource.ts` | The only module that touches pdf.js |
 | `usePdfEditSession.ts` | The state: what is known about the pages, and what was changed |
 | `PdfEditPage.tsx` | The paper: pages recomposed from strips |
@@ -159,6 +160,10 @@ What it does not do:
   across a break where the next line would not have fit. A chapter that ends
   short of its page, or a pair of columns the file balanced, stays as it is —
   and a page whose last lines were all taken back stays in the document, blank.
+- **Keep a change on its page.** A page holds as much as the pages either side
+  of it do, and no more. In a book whose pages are all set full, a line added
+  on one pushes a line off every page after it, as far as there is room: the
+  short last page of the chapter, or the space above the next chapter's title.
 - **Search or mark what was typed.** Find looks through the file's text. A
   match, a decoration or a link on words that have since been replaced has
   nowhere to be drawn and is passed over.
@@ -168,8 +173,26 @@ What it does not do:
   not have is drawn by the browser in some other font, and is not what a host
   will be able to save.
 - **Find structure the host did not name.** Paragraphs, columns and running
-  heads are found by geometry. A table can be taken for columns, and a scanned
-  page is one unbreakable block.
+  heads are found by geometry. A scanned page is one unbreakable block, and a
+  note set in the margin beside a line is read as the end of that line. A
+  table is taken for columns standing side by side: its cells are not poured
+  from one column into the next, but nothing keeps its rows level either -- a
+  cell that grows pushes down its own column and no other.
+- **Set a formula again.** A formula in the middle of a sentence is letters
+  from a mathematical font, or not letters at all but drawings. Unless the
+  host names it in `textSubstitutions`, its paragraph is offered as prose:
+  typed into, its symbols are set in the stand-in font with the words -- an
+  italic variable as a plain letter of another face, a symbol as whatever
+  character the file's encoding claims it is -- and what was drawn stays where
+  it was while the words move away from it.
+- **Move what is drawn behind a word with the word.** The tint behind a
+  paragraph is kept under its new lines; the shading behind one phrase of it --
+  inline code, a highlight -- is kept where the phrase was.
+- **Look like the page it replaces.** An edited paragraph is set in an
+  installed font. Few documents are set in one: a book in Source Sans or
+  Computer Modern comes back in the system's sans-serif or serif at the same
+  size, weight and slant, wider or narrower than it was, and breaks its lines
+  elsewhere.
 - **Restart an input method's composition.** A composition begun in a paragraph
   the page still draws starts over once the paragraph is live text.
 

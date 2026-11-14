@@ -10,9 +10,14 @@ import type { Paragraph, StyledRun } from "./paragraphs.js";
  * is for where each document was left.
  */
 export interface PdfEditDraft {
-  version: 1;
+  version: typeof DRAFT_VERSION;
   edits: DraftEdit[];
 }
+
+/** Raised when what an edit says comes to mean something else. Version 1
+ *  named fonts by what pdf.js called them in the session that wrote it, which
+ *  the next session cannot read back. */
+export const DRAFT_VERSION = 2;
 
 /** One changed paragraph: what it was on the page, and what it says now. The
  *  paragraph is kept whole because it is the evidence the edit still applies:
@@ -46,10 +51,11 @@ export interface PdfEditStore {
  */
 export function usableEdits(draft: PdfEditDraft | null): DraftEdit[] {
   if (!draft) return [];
-  const usable = draft.edits.filter(isUsable);
-  if (usable.length < draft.edits.length) {
+  const edits = Array.isArray(draft.edits) ? draft.edits : [];
+  const usable = draft.version === DRAFT_VERSION ? edits.filter(isUsable) : [];
+  if (usable.length < edits.length) {
     console.warn(
-      `PDF edit: ${draft.edits.length - usable.length} unsaved change(s) were written by a version of the reader this one cannot read, and were dropped`,
+      `PDF edit: ${edits.length - usable.length} unsaved change(s) were written by a version of the reader this one cannot read, and were dropped`,
     );
   }
   return usable;

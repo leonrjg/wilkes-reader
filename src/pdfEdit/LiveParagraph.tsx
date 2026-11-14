@@ -55,9 +55,8 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   if (boxes.length > 0) lastBoxes.current = boxes;
   const shown = lastBoxes.current;
 
-  const liveFontOf = (style: RunStyle) => session.liveFontOf(paragraph.page, style);
-  const faceOf = (style: RunStyle) =>
-    liveFace(style.fontName, session.fontOf(paragraph.page, style.fontName), liveFontOf(style));
+  const liveFontOf = (style: RunStyle) => session.liveFontOf(style);
+  const faceOf = (style: RunStyle) => liveFace(session.fontOf(style.fontName), liveFontOf(style));
   const textStyle = {
     ...paragraphTextStyle(paragraph, faceOf(paragraph.styles[paragraph.baseStyle]), scale),
     color: paragraph.color,

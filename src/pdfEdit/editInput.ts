@@ -158,7 +158,7 @@ export function attachEditInput(
           from: handle === start.handle ? start.offset : 0,
           to: handle === end.handle ? end.offset : lengthOf(handle),
           styles: paragraph.styles,
-          fontOf: (fontName: string) => session().fontOf(paragraph.page, fontName),
+          fontOf: (fontName: string) => session().fontOf(fontName),
         };
       })
       .filter((part) => part.to > part.from);

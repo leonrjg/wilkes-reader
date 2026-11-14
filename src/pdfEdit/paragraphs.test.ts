@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FlowItem, PageFlow } from "./flow.js";
 import { splitRuns } from "./edits.js";
-import { paragraphsOf, runningOnInto, type TextRun } from "./paragraphs.js";
+import { continuesIn, paragraphsOf, runningOnInto, type TextRun } from "./paragraphs.js";
 
 const LEFT = 50;
 const RIGHT = 250;
@@ -73,6 +73,58 @@ describe("paragraphsOf", () => {
     const paragraphs = paragraphsOf(flowOf(lines, [4, 4, 4, 4, 16, 4]), lines.map(({ run }) => run));
     expect(paragraphs.map((paragraph) => paragraph.itemIds.length)).toEqual([2, 2, 1, 1]);
     expect(paragraphs[3].inset).toBe(12);
+  });
+
+  it("keeps ragged lines together: a line is not short because it stops before the edge", () => {
+    // Set flush left, so no line reaches the edge. Each was broken because the
+    // next word did not fit -- except the fourth, whose follower would have.
+    const lines = [
+      line(0, 40, "Ragged text never reaches the", LEFT, 236),
+      line(1, 52, "right-hand edge, but every line", LEFT, 250),
+      line(2, 64, "was broken only because the", LEFT, 228),
+      line(3, 76, "following word was too long.", LEFT, 215),
+      line(4, 88, "A list item, quite short.", LEFT, 160),
+      line(5, 100, "And another one after it.", LEFT, 170),
+    ];
+    const paragraphs = paragraphsOf(flowOf(lines), lines.map(({ run }) => run));
+    expect(paragraphs.map((paragraph) => paragraph.itemIds.length)).toEqual([4, 1, 1]);
+    expect(paragraphs[0].align).toBe("left");
+  });
+
+  it("measures a column by its lines, not by a note set in the margin beside one", () => {
+    const body = (index: number, text: string) => line(index, 40 + index * 12, text);
+    const lines = Array.from({ length: 12 }, (_, index) => body(index, "A full line of the paragraph's own text"));
+    // The second line has a word in the margin, on its own baseline.
+    const note: TextRun = { text: "margin", x: 262, width: 30, baseline: lines[1].run.baseline, fontSize: 10, fontName: "f1", color: "black" };
+    lines[1].item.content = { kind: "slice", page: 1, rect: { x: LEFT, y: 52, width: 260, height: 8 } };
+    const paragraphs = paragraphsOf(flowOf(lines), [...lines.map(({ run }) => run), note]);
+    expect(paragraphs.map((paragraph) => paragraph.itemIds.length)).toEqual([12]);
+  });
+
+  it("knows a paragraph that goes on in the next column from one that ended", () => {
+    const paragraphOf = (rows: Array<ReturnType<typeof line>>) => paragraphsOf(flowOf(rows), rows.map(({ run }) => run))[0];
+    const next = paragraphOf([line(0, 40, "Following words that begin the next"), line(1, 52, "column of the page.", LEFT, 150)]);
+    // Its last line stops a word short of the edge: "Following" did not fit.
+    const broken = paragraphOf([line(0, 40, "A paragraph the column's foot cut in"), line(1, 52, "two, mid-sentence, and it goes", LEFT, 222)]);
+    expect(continuesIn(broken, next)).toBe(true);
+    // Its last line stops well short: the paragraph ended there.
+    const ended = paragraphOf([line(0, 40, "A paragraph that says what it has to"), line(1, 52, "and ends.", LEFT, 100)]);
+    expect(continuesIn(ended, next)).toBe(false);
+  });
+
+  it("keeps a list item whose first line hangs to the left of the rest", () => {
+    const lines = [
+      line(0, 40, "Before the list, a full line of"),
+      line(1, 52, "text, and its end.", LEFT, 140),
+      line(2, 64, "\u2022 an item of the list, long enough"),
+      line(3, 76, "to go on under its own words", LEFT + 12, 230),
+      line(4, 88, "and end.", LEFT + 12, 100),
+      line(5, 100, "\u2022 another item, of one line.", LEFT, 200),
+    ];
+    const paragraphs = paragraphsOf(flowOf(lines), lines.map(({ run }) => run));
+    expect(paragraphs.map((paragraph) => paragraph.itemIds.length)).toEqual([2, 3, 1]);
+    // Its edge is where its later lines are; its first line starts left of it.
+    expect(paragraphs[1]).toMatchObject({ inset: 12, indent: -12, width: 188 });
   });
 
   it("keeps the runs of type a paragraph is set in", () => {

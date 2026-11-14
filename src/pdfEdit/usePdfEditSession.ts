@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BoundingBox } from "../documentCoordinates.js";
 import type { PDFDocumentProxy } from "../pdfjs.js";
-import { blankPageFlow, buildPageFlow, resolveDocumentFrame } from "./documentFrame.js";
+import { blankPageFlow, buildPageFlow, resolveDocumentFrame, type DocumentFrame } from "./documentFrame.js";
 import { buildExport, type PdfEditExport, type TypesetText } from "./editExport.js";
-import { usableEdits, type PdfEditStore } from "./editStore.js";
+import { DRAFT_VERSION, usableEdits, type PdfEditStore } from "./editStore.js";
 import {
   applyEdits,
   createEdit,
@@ -16,13 +16,13 @@ import {
   type ParagraphEdit,
 } from "./edits.js";
 import type { FlowItem, PageFlow, Placement } from "./flow.js";
-import { useLiveFonts, type LiveFont, type ResolvePdfFont } from "./hostFonts.js";
+import { useLiveFonts, type LiveFont, type PdfFontRequest, type ResolvePdfFont } from "./hostFonts.js";
 import {
   adoptRuns,
   paragraphAfter,
   paragraphsOf,
+  continuesIn,
   runningOnInto,
-  runsToEdge,
   type Paragraph,
   type RunStyle,
   type StyledRun,
@@ -92,6 +92,7 @@ export interface PdfEditSession {
   documentPages: number;
   rasters: PageRasters;
   edits: readonly ParagraphEdit[];
+  /** Ask for a page to be read, with the pages that frame it. */
   requestAnalysis: (page: number) => void;
   pageView: (page: number) => PageView;
   /** A page's paragraphs in reading order, wherever they are drawn now: its
@@ -124,11 +125,10 @@ export interface PdfEditSession {
   /** The page and height that a height on a page of the file is at now. */
   relocateHeight: (page: number, y: number) => { page: number; y: number };
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
-  /** What is known of a font used on a page, by the name pdf.js loaded it as. */
-  fontOf: (page: number, fontName: string) => FontInfo;
-  /** The whole font the host resolved a style of a page's paragraph to, once
-   *  it has. */
-  liveFontOf: (page: number, style: RunStyle) => LiveFont | null;
+  /** What is known of a font, by the name the file gives it. */
+  fontOf: (fontName: string) => FontInfo;
+  /** The whole font the host resolved a style to, once it has. */
+  liveFontOf: (style: RunStyle) => LiveFont | null;
   /** Set a paragraph in other type: it says `runs`, written against `styles`
    *  -- its own table of styles, with any new one added at its end. The
    *  selection is put back over the text it covered. */
@@ -176,15 +176,40 @@ export function joinNeighbour(
   let firstRuns = first === slot ? runs : runsOfSlot(first);
   // A paragraph the page broke across a column or a page is in two pieces
   // that were never two paragraphs: the join is in the middle of a sentence.
-  if (!first.edit && runsToEdge(first.paragraph)) firstRuns = runningOnInto(firstRuns, lastRuns);
+  if (!first.edit && continuesIn(first.paragraph, last.paragraph)) firstRuns = runningOnInto(firstRuns, lastRuns);
   return session.joinParagraphs(first, last, firstRuns, lastRuns) !== null;
 }
 
-const DEFAULT_FONT: FontInfo = { name: "", generic: "serif", bold: false, italic: false };
+/** A font of a page that has not been analysed yet: a draft is taken up
+ *  before the pages its paragraphs are on have been read. */
+const DEFAULT_FONT: FontInfo = { name: "", face: "", generic: "serif", bold: false, italic: false };
+
+/** What a host is asked for a font by: what is known of it, less the name
+ *  pdf.js has for its embedded face, which means nothing outside this page. */
+const requestOf = ({ face: _face, ...font }: FontInfo): PdfFontRequest => font;
 
 const NO_BACKDROPS: Backdrop[] = [];
 /** How many pages past the one a cascade is waiting on are analysed with it. */
 const ANALYSE_AHEAD = 2;
+
+/** How many pages either side of a page are read with it. A page's running
+ *  head is one because its neighbours have it too, and how far down its
+ *  content may go is how far theirs does. Its neighbours and no further: what
+ *  a page is must not depend on how much of the document happens to have been
+ *  read, or a page already laid out would shift under the reader as they
+ *  scrolled on -- and under a save, which reads to the end. */
+const FRAME_REACH = 2;
+
+/** The pages a page's frame is read from. A page past the document's end is
+ *  framed as its last page is. */
+function framedBy(page: number, documentPages: number): number[] {
+  const centre = Math.min(page, documentPages);
+  const pages: number[] = [];
+  for (let other = Math.max(1, centre - FRAME_REACH); other <= Math.min(documentPages, centre + FRAME_REACH); other++) {
+    pages.push(other);
+  }
+  return pages;
+}
 
 /** What names a paragraph across re-analysis: the first item it occupies. */
 export const paragraphKey = (paragraph: Paragraph) => paragraph.itemIds[0];
@@ -252,7 +277,7 @@ export function usePdfEditSession(
       documentKey,
       edits.length > 0
         ? {
-            version: 1,
+            version: DRAFT_VERSION,
             edits: edits.map(({ paragraph, runs, after, structural, absorbed }) => ({
               paragraph,
               runs,
@@ -270,7 +295,7 @@ export function usePdfEditSession(
   const rasters = useMemo(() => (pdf && active ? new PageRasters(pdf) : null), [pdf, active]);
   useEffect(() => () => rasters?.dispose(), [rasters]);
 
-  const requestAnalysis = useCallback(
+  const analyse = useCallback(
     (page: number) => {
       if (!pdf || page < 1 || page > pdf.numPages || requested.current.has(page)) return;
       requested.current.add(page);
@@ -290,14 +315,32 @@ export function usePdfEditSession(
     },
     [pdf],
   );
+  // A page is not known until the pages that frame it are.
+  const requestAnalysis = useCallback(
+    (page: number) => {
+      for (const framing of framedBy(page, documentPages)) analyse(framing);
+    },
+    [analyse, documentPages],
+  );
 
-  // Everything known about the pages, as flows. Rebuilt whole when a page's
-  // analysis lands, because what one page says can change another's: a running
-  // head is only recognised as one once a second page has it too.
+  // Everything known about the pages, as flows. A page's flow is made from
+  // the page and from the pages either side of it -- a running head is only
+  // recognised as one because a neighbour has it too -- and is not made until
+  // all of them have been read: it is then what it will always be.
   const model = useMemo(() => {
-    const frame = resolveDocumentFrame(
-      new Map([...analyses].map(([page, analysis]) => [page, analysis.layout])),
-    );
+    const frames = new Map<number, DocumentFrame | null>();
+    const frameOf = (page: number): DocumentFrame | null => {
+      const centre = Math.min(page, documentPages);
+      let frame = frames.get(centre);
+      if (frame === undefined) {
+        const framing = framedBy(centre, documentPages);
+        frame = framing.every((other) => analyses.has(other))
+          ? resolveDocumentFrame(new Map(framing.map((other) => [other, analyses.get(other)!.layout])))
+          : null;
+        frames.set(centre, frame);
+      }
+      return frame;
+    };
     const flows = new Map<number, PageFlow>();
     const paragraphs = new Map<number, Paragraph[]>();
     const identity = new Map<number, Placement[]>();
@@ -305,6 +348,8 @@ export function usePdfEditSession(
     const flowOf = (page: number): PageFlow | null => {
       const known = flows.get(page);
       if (known) return known;
+      const frame = frameOf(page);
+      if (!frame) return null;
       let flow: PageFlow;
       if (page > documentPages) {
         const size = pageSizes[documentPages - 1];
@@ -422,12 +467,13 @@ export function usePdfEditSession(
     const stale = edits.filter((edit) => {
       // What it absorbed must still be there to be left out.
       const adrift = edit.absorbed.some(
-        (items) => analyses.has(items.page) && !model.hasItems(items.page, items.itemIds),
+        (items) => model.flowOf(items.page) !== null && !model.hasItems(items.page, items.itemIds),
       );
       if (adrift) return true;
       // One that follows another edit goes when that edit has gone.
       if (!replacesItems(edit)) return unanchored(edit);
-      if (!analyses.has(edit.paragraph.page)) return false;
+      // Not before the page is known: read, and the pages that frame it too.
+      if (!model.flowOf(edit.paragraph.page)) return false;
       // Two paragraphs joined say what neither says on the page; what they
       // need is for every strip they replaced to still be there.
       if (edit.structural) return !model.hasItems(edit.paragraph.page, edit.paragraph.itemIds);
@@ -442,7 +488,7 @@ export function usePdfEditSession(
       stale.map((edit) => ({ page: edit.paragraph.page, was: edit.paragraph.text.slice(0, 60) })),
     );
     setEdits((current) => current.filter((edit) => !stale.includes(edit)));
-  }, [edits, analyses, model]);
+  }, [edits, model]);
 
   // Stable, because the editable blocks hold them across renders: one that
   // changed identity with every keystroke would re-run the effects that write
@@ -492,22 +538,27 @@ export function usePdfEditSession(
   // Every font the analysed pages use is resolved ahead of need, so the whole
   // font is already there when the first keystroke turns a paragraph live. So
   // is every other face of one that the reader has set a word in.
-  const fontsInUse = useMemo(() => {
-    const unique = new Map<string, FontInfo>();
+  // A font is the same font on every page that uses it, and a paragraph can
+  // hold text from more than one: joined to it from the next page.
+  const fonts = useMemo(() => {
+    const known = new Map<string, FontInfo>();
     for (const analysis of analyses.values()) {
-      for (const font of analysis.fonts.values()) unique.set(JSON.stringify(font), font);
+      for (const [name, font] of analysis.fonts) if (!known.has(name)) known.set(name, font);
     }
+    return known;
+  }, [analyses]);
+  const fontsInUse = useMemo(() => {
+    const unique = new Map<string, PdfFontRequest>();
+    const want = (request: PdfFontRequest) => unique.set(JSON.stringify(request), request);
+    for (const font of fonts.values()) want(requestOf(font));
     for (const edit of edits) {
-      const fonts = analyses.get(edit.paragraph.page)?.fonts;
       for (const style of edit.paragraph.styles) {
-        const font = fonts?.get(style.fontName);
-        if (!font) continue;
-        const request = fontRequestOf(style, font);
-        unique.set(JSON.stringify(request), request);
+        const font = fonts.get(style.fontName);
+        if (font) want(fontRequestOf(style, requestOf(font)));
       }
     }
     return [...unique.values()];
-  }, [analyses, edits]);
+  }, [fonts, edits]);
   const liveFont = useLiveFonts(resolveFont, fontsInUse);
 
   return useMemo(() => {
@@ -602,7 +653,7 @@ export function usePdfEditSession(
     const slotsAcross = (from: number, to: number): Slot[] | null => {
       const slots: Slot[] = [];
       for (let page = from; page <= to; page++) {
-        if (page <= documentPages && !analyses.has(page)) {
+        if (page <= documentPages && !model.flowOf(page)) {
           requestAnalysis(page);
           return null;
         }
@@ -713,10 +764,10 @@ export function usePdfEditSession(
       locate,
 
       fragmentsOf: (edit) => editFragments(edit, reflow.plans),
-      fontOf: (page, fontName) => analyses.get(page)?.fonts.get(fontName) ?? DEFAULT_FONT,
-      liveFontOf: (page, style) => {
-        const font = analyses.get(page)?.fonts.get(style.fontName);
-        return font ? liveFont(fontRequestOf(style, font)) : null;
+      fontOf: (fontName) => fonts.get(fontName) ?? DEFAULT_FONT,
+      liveFontOf: (style) => {
+        const font = fonts.get(style.fontName);
+        return font ? liveFont(fontRequestOf(style, requestOf(font))) : null;
       },
       retype,
       registerTypesetter,

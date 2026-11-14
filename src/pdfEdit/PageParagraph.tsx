@@ -44,7 +44,7 @@ export default function PageParagraph({ session, paragraph, geometryOf, register
     });
   }, [register, paragraph]);
 
-  const face = pageFace(paragraph.fontName, session.fontOf(paragraph.page, paragraph.fontName));
+  const face = pageFace(session.fontOf(paragraph.fontName));
   const ascent = estimatedAscent(paragraph);
   const lines = paragraph.lines.map((line, index) => {
     const at = session.locate(line.itemId);

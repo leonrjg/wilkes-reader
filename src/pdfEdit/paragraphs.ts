@@ -11,7 +11,8 @@ import { median } from "./pageLayout.js";
  * replaced -- and the text and type it was set in -- so it can be set again.
  *
  * The grouping is typographic guesswork, the same guesses every PDF text
- * extractor makes: a wider gap, a change of size, a short line, an indent. A
+ * extractor makes: a wider gap, a change of size, an indent, a line broken
+ * before it was full. A
  * host whose own extraction already knows the page's blocks could supply them
  * instead; nothing downstream depends on how a `Paragraph` was arrived at.
  */
@@ -23,7 +24,7 @@ export interface TextRun {
   width: number;
   baseline: number;
   fontSize: number;
-  /** The name pdf.js loaded the run's embedded font under. */
+  /** The run's font, by the name the file gives it. */
   fontName: string;
   /** The colour the run is drawn in, as CSS. */
   color: string;
@@ -31,7 +32,8 @@ export interface TextRun {
 
 /** How a stretch of text is set. */
 export interface RunStyle {
-  /** The name pdf.js loaded the embedded font under. */
+  /** The font, by the name the file gives it: the same in every session, and
+   *  on every page that uses the font. */
   fontName: string;
   fontSize: number;
   color: string;
@@ -89,10 +91,12 @@ export interface Paragraph {
   lastBaseline: number;
   /** Baseline to baseline. */
   lineHeight: number;
-  /** The left edge of the paragraph's lines, first-line indent aside, measured
-   *  in from its column's left edge. */
+  /** The left edge of the paragraph's lines, its first line aside, measured in
+   *  from its column's left edge. */
   inset: number;
   width: number;
+  /** How far in from that edge the first line starts. Negative where it hangs
+   *  out to the left of the rest, as a list item's does. */
   indent: number;
   fontName: string;
   fontSize: number;
@@ -114,6 +118,8 @@ interface Line {
   baseline: number;
   left: number;
   right: number;
+  /** How far the line's first word reaches from its left edge. */
+  firstWord: number;
   fontSize: number;
   fontName: string;
   color: string;
@@ -123,10 +129,23 @@ interface Line {
 const PARAGRAPH_GAP_RATIO = 1.6;
 /** Sizes within this fraction of each other are the same size. */
 const FONT_SIZE_TOLERANCE = 0.08;
-/** A line this many ems short of the column's right edge ends its paragraph. */
-const SHORT_LINE_EMS = 1.5;
+/** The share of a column's lines that reach its right edge or stop short of
+ *  it. The few that reach further have something beside them -- a note set in
+ *  the margin -- and are not what the column is measured by. */
+const MEASURE_QUANTILE = 0.9;
+/** A word space, in ems. */
+const SPACE_EMS = 0.25;
+/** A first word is measured from its run's width, shared out among the run's
+ *  characters. It has to fit by this much more than that estimate before the
+ *  line above is taken to have been broken early. */
+const FIT_MARGIN = 1.15;
 /** A line starting this many ems in from the column's left edge is indented. */
 const INDENT_EMS = 0.6;
+/** Lines starting within this many ems of each other start at the same edge. */
+const SAME_EDGE_EMS = 0.3;
+/** What an item of a list opens with: a bullet or a dash, a number or a
+ *  letter with its stop or bracket, a reference's number in brackets. */
+const LIST_MARKER = /^(?:[\u2022\u25E6\u25AA\u25CF\u2023\u2043\u00B7\u2013\u2014*-]|\(?\d{1,3}[.)]|\(?[a-zA-Z][.)]|\[\d+\])\s/;
 /** Runs this many ems apart on a line have a space between them. */
 const WORD_GAP_EMS = 0.2;
 /** Baselines within this many ems are one line: a superscript does not start
@@ -155,7 +174,7 @@ function columnParagraphs(
   if (allLines.length === 0) return [];
 
   const columnLeft = Math.min(...allLines.map((line) => line.left));
-  const columnRight = Math.max(...allLines.map((line) => line.right));
+  const columnRight = measureEdge(allLines);
   const textGaps = lined
     .slice(1)
     .filter((entry, index) => entry.lines.length > 0 && lined[index].lines.length > 0)
@@ -175,7 +194,7 @@ function columnParagraphs(
     group = [];
   };
 
-  for (const entry of lined) {
+  for (const [index, entry] of lined.entries()) {
     if (entry.lines.length === 0) {
       close();
       continue;
@@ -185,17 +204,43 @@ function columnParagraphs(
       const last = previous.lines[previous.lines.length - 1];
       const next = entry.lines[0];
       const em = last.fontSize;
+      // A line is broken where the next word no longer fits. Where it would
+      // have fit, the break was meant: the paragraph ended. That holds for
+      // text set ragged as for text set flush, which a fixed shortfall from
+      // the right edge does not -- every line of ragged text falls short.
+      const room = columnRight - last.right;
+      // An indent under a line that is not indented starts a paragraph --
+      // unless that line is all the paragraph has so far and is the first of
+      // an item of a list, which hangs out to the left of the rest of it. It
+      // is known by its bullet or its number, or by the line after the
+      // indented one being indented with it.
+      const indented =
+        next.left - columnLeft > INDENT_EMS * em && last.left - columnLeft <= INDENT_EMS * em;
+      const following = lined[index + 1];
+      const after = following?.lines[0];
+      const stays =
+        after !== undefined &&
+        following.item.gapBefore <= usualGap * PARAGRAPH_GAP_RATIO + 1 &&
+        Math.abs(after.left - next.left) <= SAME_EDGE_EMS * em;
+      const hanging =
+        group.length === 1 && previous.lines.length === 1 && (LIST_MARKER.test(last.text) || stays);
       const breaks =
         entry.item.gapBefore > usualGap * PARAGRAPH_GAP_RATIO + 1 ||
         Math.abs(next.fontSize - last.fontSize) > FONT_SIZE_TOLERANCE * last.fontSize ||
-        columnRight - last.right > SHORT_LINE_EMS * em ||
-        (next.left - columnLeft > INDENT_EMS * em && last.left - columnLeft <= INDENT_EMS * em);
+        brokenEarly(room, next.firstWord, em) ||
+        (indented && !hanging);
       if (breaks) close();
     }
     group.push(entry);
   }
   close();
   return alignedWithColumn(paragraphs);
+}
+
+/** The right edge a column's lines are set to. */
+function measureEdge(lines: Line[]): number {
+  const rights = lines.map((line) => line.right).sort((a, b) => a - b);
+  return rights[Math.ceil(rights.length * MEASURE_QUANTILE) - 1];
 }
 
 /** A paragraph of one or two lines does not say how it is aligned: there are
@@ -217,14 +262,23 @@ function alignedWithColumn(paragraphs: Paragraph[]): Paragraph[] {
   });
 }
 
-/** Whether a paragraph's last line runs to the edge of its column. It did not
- *  end there, then: what follows it in the next column or on the next page is
- *  the rest of the same paragraph. */
-export function runsToEdge(paragraph: Paragraph): boolean {
+/** Whether a line with `room` left on it was broken early: the word that
+ *  starts the next line would have fit. */
+const brokenEarly = (room: number, firstWord: number, em: number) =>
+  room > firstWord * FIT_MARGIN + SPACE_EMS * em;
+
+/** Whether `next` is the rest of `paragraph`: the last line of the one was
+ *  broken only because the first word of the other did not fit on it. They
+ *  are then two pieces of one paragraph that a column or a page came between,
+ *  and were never two paragraphs. */
+export function continuesIn(paragraph: Paragraph, next: Paragraph): boolean {
   const last = paragraph.lines[paragraph.lines.length - 1];
-  if (!last) return false;
-  const short = paragraph.inset + paragraph.width - (last.inset + last.width);
-  return short <= SHORT_LINE_EMS * paragraph.fontSize;
+  const first = next.lines[0];
+  if (!last || !first) return false;
+  const room = paragraph.inset + paragraph.width - (last.inset + last.width);
+  const word = first.text.split(/\s/)[0];
+  const firstWord = (first.width * advanceOf(word)) / advanceOf(first.text);
+  return !brokenEarly(room, firstWord, paragraph.fontSize);
 }
 
 /** Runs ready to have `next` run straight on from them as part of the same
@@ -302,10 +356,45 @@ function lineFrom(runs: TextRun[]): Line {
     baseline: main.baseline,
     left: inked.length > 0 ? Math.min(...inked.map((run) => run.x)) : main.x,
     right: inked.length > 0 ? Math.max(...inked.map((run) => run.x + run.width)) : main.x,
+    firstWord: firstWordWidth(inked, main.fontSize),
     fontSize: main.fontSize,
     fontName: main.fontName,
     color: main.color,
   };
+}
+
+/** Roughly how wide a character is beside its neighbours in a proportional
+ *  face. Only used to share a run's measured width out among its characters,
+ *  so only the proportions matter. */
+function advance(character: string): number {
+  if (/[\siljtfrI.,;:'!|()[\]]/.test(character)) return 0.5;
+  if (/[mwMW@%]/.test(character)) return 1.5;
+  if (/\p{Lu}/u.test(character)) return 1.25;
+  return 1;
+}
+
+const advanceOf = (text: string) => [...text].reduce((sum, character) => sum + advance(character), 0);
+
+/** How far a line's first word reaches from the line's left edge. The file
+ *  says how wide each run is, not each word, so the word's share of its run
+ *  is estimated from its characters. `inked` is the line's runs, left to
+ *  right, without the ones that are only space. */
+function firstWordWidth(inked: TextRun[], em: number): number {
+  const first = inked[0];
+  if (!first) return 0;
+  let right = first.x;
+  for (const [index, run] of inked.entries()) {
+    const lead = run.text.length - run.text.trimStart().length;
+    // A space, written or left, before this run: the word ended with the last.
+    if (index > 0 && (lead > 0 || run.x - right > WORD_GAP_EMS * em)) break;
+    const end = run.text.slice(lead).search(/\s/);
+    if (end >= 0) {
+      right = run.x + (run.width * advanceOf(run.text.slice(0, lead + end))) / advanceOf(run.text);
+      break;
+    }
+    right = run.x + run.width;
+  }
+  return right - first.x;
 }
 
 function styleOf(run: TextRun, main: TextRun): RunStyle {
@@ -389,7 +478,9 @@ function paragraphFrom(
   });
   const baseStyle = styles.findIndex((style) => styleKey(style) === styleKey(base));
   const first = lines[0];
-  const x = Math.min(...lines.map((line) => line.left));
+  // The left edge is the one the lines after the first are set to. The first
+  // can start to the right of it, indented, or to the left of it, hanging.
+  const x = Math.min(...(lines.length > 1 ? lines.slice(1) : lines).map((line) => line.left));
   const right = Math.max(...lines.map((line) => line.right));
   const { fontSize } = base;
   const steps = lines.slice(1).map((line, index) => line.baseline - lines[index].baseline);
