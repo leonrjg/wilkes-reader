@@ -1,3 +1,4 @@
+import type { BoundingBox } from "../documentCoordinates.js";
 import type { FlowColumn, FlowItem, PageFlow } from "./flow.js";
 import { median } from "./pageLayout.js";
 
@@ -67,6 +68,9 @@ export interface Paragraph {
   page: number;
   /** The consecutive items of one column this paragraph occupies. */
   itemIds: string[];
+  /** The part of the page those items cover: the paragraph's lines, and with
+   *  them whatever it stands on -- a tint, a border, a rule beside it. */
+  area: BoundingBox;
   /** False where the paragraph sits beside another column: its lines cannot
    *  then be split between two places, and it moves as one block. */
   splittable: boolean;
@@ -352,9 +356,14 @@ function paragraphFrom(
   const justified =
     fullLines.length >= 2 && fullLines.every((line) => right - line.right < 0.5 * fontSize);
 
+  const rects = group.flatMap(({ item }) => (item.content.kind === "slice" ? [item.content.rect] : []));
+  const areaTop = Math.min(...rects.map((rect) => rect.y));
+  const areaBottom = Math.max(...rects.map((rect) => rect.y + rect.height));
+
   return {
     page,
     itemIds: group.map((entry) => entry.item.id),
+    area: { x: column.x, y: areaTop, width: column.width, height: areaBottom - areaTop },
     splittable,
     text: joined.text,
     runs,

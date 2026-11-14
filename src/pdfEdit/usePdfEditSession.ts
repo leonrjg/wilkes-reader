@@ -2,8 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "../pdfjs.js";
 import { blankPageFlow, buildPageFlow, resolveDocumentFrame } from "./documentFrame.js";
 import { buildExport, type PdfEditExport, type TypesetText } from "./editExport.js";
-import type { PdfEditStore } from "./editStore.js";
-import { applyEdits, createEdit, editFragments, type EditFragment, type ParagraphEdit } from "./edits.js";
+import { usableEdits, type PdfEditStore } from "./editStore.js";
+import {
+  applyEdits,
+  createEdit,
+  editBackdrops,
+  editFragments,
+  type Backdrop,
+  type EditFragment,
+  type ParagraphEdit,
+} from "./edits.js";
 import type { FlowItem, PageFlow, Placement } from "./flow.js";
 import { useLiveFonts, type LiveFont, type ResolvePdfFont } from "./hostFonts.js";
 import { paragraphsOf, type Paragraph } from "./paragraphs.js";
@@ -31,6 +39,8 @@ import { layoutPage, reflowDocument } from "./reflow.js";
 export interface PageView {
   flow: PageFlow | null;
   placements: Placement[] | null;
+  /** What the edited paragraphs on this page stand on, drawn under them. */
+  backdrops: Backdrop[];
 }
 
 /** What to do in a paragraph the moment it becomes live text: the keystroke
@@ -89,6 +99,8 @@ export interface PdfEditSession {
 
 const DEFAULT_FONT: FontInfo = { name: "", generic: "serif", bold: false, italic: false };
 
+const NO_BACKDROPS: Backdrop[] = [];
+
 /** What names a paragraph across re-analysis: the first item it occupies. */
 export const paragraphKey = (paragraph: Paragraph) => paragraph.itemIds[0];
 
@@ -122,7 +134,7 @@ export function usePdfEditSession(
     setHandoff(null);
     const draft = pdf ? (store?.read(documentKey) ?? null) : null;
     setEdits(
-      (draft?.edits ?? []).map(({ paragraph, runs }) => ({
+      usableEdits(draft).map(({ paragraph, runs }) => ({
         ...createEdit(`edit-${nextEditId.current++}`, paragraph),
         runs,
       })),
@@ -323,6 +335,14 @@ export function usePdfEditSession(
   return useMemo(() => {
     if (!pdf || !rasters) return null;
     const editByParagraph = new Map(edits.map((edit) => [paragraphKey(edit.paragraph), edit]));
+    // One list for every page: a page's view is asked for on each of its
+    // renders, and must be handed the same array until the layout changes.
+    const backdrops = new Map<number, Backdrop[]>();
+    for (const backdrop of edits.flatMap((edit) => editBackdrops(edit, reflow.plans))) {
+      const onPage = backdrops.get(backdrop.page);
+      if (onPage) onPage.push(backdrop);
+      else backdrops.set(backdrop.page, [backdrop]);
+    }
 
     // Where every item of the analysed pages is now. Built on first use: most
     // renders ask about a handful of paragraphs, and many ask about none.
@@ -350,6 +370,7 @@ export function usePdfEditSession(
       pageView: (page) => ({
         flow: model.flowOf(page),
         placements: reflow.plans.get(page)?.placements ?? null,
+        backdrops: backdrops.get(page) ?? NO_BACKDROPS,
       }),
 
       paragraphsOf: model.paragraphsOn,
@@ -368,7 +389,7 @@ export function usePdfEditSession(
       exportEdits: () => {
         if (edits.length === 0) return null;
         const text = [...typesetters.current.values()].flatMap((typeset) => typeset());
-        return buildExport(reflow.plans, model.flowOf, model.follows, text);
+        return buildExport(reflow.plans, model.flowOf, model.follows, text, backdrops);
       },
 
       beginEdit,

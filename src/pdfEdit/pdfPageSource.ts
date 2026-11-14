@@ -1,4 +1,4 @@
-import { AnnotationMode, Util } from "../pdfjs.js";
+import { AnnotationMode, OPS, Util } from "../pdfjs.js";
 import type { PDFDocumentProxy, PDFPageProxy } from "../pdfjs.js";
 import { installReadableStreamAsyncIterator } from "../readableStreamAsyncIterator.js";
 import type { PdfFontRequest } from "./hostFonts.js";
@@ -28,10 +28,32 @@ export interface PageAnalysis {
  *  the coarsest grid that still resolves the gap between tightly set lines. */
 const ANALYSIS_SCALE = 2;
 
+/** What of a page a raster shows: everything, or everything but its text --
+ *  the paper, with whatever is printed on it that is not writing. */
+export type RasterLayer = "page" | "paper";
+
+const TEXT_OPERATIONS: ReadonlySet<number> = new Set([
+  OPS.showText,
+  OPS.showSpacedText,
+  OPS.nextLineShowText,
+  OPS.nextLineSetSpacingShowText,
+]);
+
+/** The operations of a page that draw text, by their place in its list. */
+async function textOperations(page: PDFPageProxy): Promise<Set<number>> {
+  const { fnArray } = await page.getOperatorList();
+  const indices = new Set<number>();
+  fnArray.forEach((operation, index) => {
+    if (TEXT_OPERATIONS.has(operation)) indices.add(index);
+  });
+  return indices;
+}
+
 async function renderPage(
   page: PDFPageProxy,
   pixelsPerUnit: number,
   readBack: boolean,
+  layer: RasterLayer = "page",
 ): Promise<{ canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }> {
   const viewport = page.getViewport({ scale: pixelsPerUnit });
   const canvas = document.createElement("canvas");
@@ -39,6 +61,7 @@ async function renderPage(
   canvas.height = Math.floor(viewport.height);
   const context = canvas.getContext("2d", { alpha: false, willReadFrequently: readBack });
   if (!context) throw new Error("PDF edit: no 2D canvas context is available");
+  const text = layer === "paper" ? await textOperations(page) : null;
   // The same choices `PdfPageCanvas` makes, for the same reasons: an opaque
   // white sheet, with annotation appearances baked in.
   await page.render({
@@ -47,6 +70,7 @@ async function renderPage(
     canvasContext: context,
     viewport,
     background: "white",
+    ...(text ? { operationsFilter: (index: number) => !text.has(index) } : {}),
   }).promise;
   return { canvas, context };
 }
@@ -164,8 +188,8 @@ export class PageRasters {
     private readonly capacity = 8,
   ) {}
 
-  get(pageNumber: number, pixelsPerUnit: number): Promise<HTMLCanvasElement> {
-    const key = `${pageNumber}@${pixelsPerUnit}`;
+  get(pageNumber: number, pixelsPerUnit: number, layer: RasterLayer = "page"): Promise<HTMLCanvasElement> {
+    const key = `${layer}:${pageNumber}@${pixelsPerUnit}`;
     const cached = this.entries.get(key);
     if (cached) {
       // Re-inserted, so the map's order is recency.
@@ -175,7 +199,7 @@ export class PageRasters {
     }
     const raster = this.pdf
       .getPage(pageNumber)
-      .then((page) => renderPage(page, pixelsPerUnit, false))
+      .then((page) => renderPage(page, pixelsPerUnit, false, layer))
       .then(({ canvas }) => canvas);
     raster.catch(() => this.entries.delete(key));
     this.entries.set(key, raster);

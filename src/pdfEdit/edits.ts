@@ -1,3 +1,4 @@
+import type { BoundingBox } from "../documentCoordinates.js";
 import type { FlowColumn, FlowItem, PageFlow } from "./flow.js";
 import type { Paragraph, StyledRun } from "./paragraphs.js";
 import type { PagePlan } from "./reflow.js";
@@ -105,6 +106,79 @@ function editItems(edit: ParagraphEdit, gapBefore: number, trailing: number): Fl
     content: { kind: "edit" as const, editId: edit.id, line, lines: 1 },
   }));
 }
+
+/** A piece of the page drawn *behind* an edited paragraph: the paper it stood
+ *  on, without the words. */
+export interface Backdrop {
+  /** The page it is drawn on. */
+  page: number;
+  /** Where on the paragraph's own page it is cut from. */
+  source: { page: number; rect: BoundingBox };
+  x: number;
+  y: number;
+}
+
+/**
+ * What an edited paragraph stands on, cut to fit the lines it has now.
+ *
+ * A paragraph is often set on something -- a tinted box, a border, a rule down
+ * its side. That belongs to the paragraph, not to its words, so it stays when
+ * the words are replaced; and it has to grow and shrink with them. The area
+ * the paragraph covered is cut into what was above its first line, one piece
+ * per line, and what was below its last. Each line the paragraph has now gets
+ * a line's piece -- its own for as long as there is one, the last *inner*
+ * line's again for every line added -- and the top and bottom go above the
+ * first line and below the last, wherever those have ended up.
+ */
+export function editBackdrops(edit: ParagraphEdit, plans: ReadonlyMap<number, PagePlan>): Backdrop[] {
+  const { paragraph } = edit;
+  const { area, lineHeight } = paragraph;
+  const original = paragraph.lineCount;
+  const top = paragraph.firstBaseline - ascentOf(edit);
+  const cut = (y: number, height: number) => ({
+    page: paragraph.page,
+    rect: { x: area.x, y, width: area.width, height },
+  });
+  const lineSource = (line: number) => {
+    const last = edit.lineCount - 1;
+    const index = line === last ? original - 1 : Math.min(line, Math.max(0, original - 2));
+    return cut(top + index * lineHeight, lineHeight);
+  };
+
+  const lines: Array<{ page: number; x: number; y: number }> = [];
+  for (const plan of [...plans.values()].sort((a, b) => a.page - b.page)) {
+    for (const placement of plan.placements) {
+      const { content } = placement.item;
+      if (content.kind !== "edit" || content.editId !== edit.id) continue;
+      for (let offset = 0; offset < content.lines; offset++) {
+        lines[content.line + offset] = {
+          page: plan.page,
+          x: placement.x,
+          y: placement.y + offset * lineHeight,
+        };
+      }
+    }
+  }
+
+  const backdrops: Backdrop[] = [];
+  lines.forEach((at, line) => {
+    backdrops.push({ ...at, source: lineSource(line) });
+  });
+  const first = lines[0];
+  const last = lines[edit.lineCount - 1];
+  const above = top - area.y;
+  if (first && above > EPSILON) {
+    backdrops.push({ ...first, y: first.y - above, source: cut(area.y, above) });
+  }
+  const below = area.y + area.height - (top + original * lineHeight);
+  if (last && below > EPSILON) {
+    backdrops.push({ ...last, y: last.y + lineHeight, source: cut(top + original * lineHeight, below) });
+  }
+  return backdrops;
+}
+
+/** Heights are sums of measurements: less than this is nothing. */
+const EPSILON = 0.01;
 
 /** A run of an edit's lines that sit together on one page. */
 export interface EditFragment {

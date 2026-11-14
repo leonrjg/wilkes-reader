@@ -1,4 +1,5 @@
 import type { BoundingBox } from "../documentCoordinates.js";
+import type { Backdrop } from "./edits.js";
 import type { FlowItem, PageFlow, Placement } from "./flow.js";
 import type { PagePlan } from "./reflow.js";
 
@@ -31,6 +32,8 @@ export interface ExportStrip {
   rect: BoundingBox;
   x: number;
   y: number;
+  /** Drawn without its text: what an edited paragraph stood on. */
+  graphicsOnly?: boolean;
 }
 
 /** A run of text on one baseline, in one font. */
@@ -62,6 +65,7 @@ export function buildExport(
   flowOf: (page: number) => PageFlow | null,
   follows: (previous: FlowItem, next: FlowItem) => boolean,
   text: readonly TypesetText[],
+  backdrops: ReadonlyMap<number, readonly Backdrop[]> = new Map(),
 ): PdfEditExport {
   const pages: ExportPage[] = [];
   for (const plan of [...plans.values()].sort((a, b) => a.page - b.page)) {
@@ -73,6 +77,13 @@ export function buildExport(
       height: flow.height,
       strips: [
         ...flow.fixed.map((rect) => ({ source: plan.page, rect, x: rect.x, y: rect.y })),
+        ...(backdrops.get(plan.page) ?? []).map(({ source, x, y }) => ({
+          source: source.page,
+          rect: source.rect,
+          x,
+          y,
+          graphicsOnly: true,
+        })),
         ...mergedStrips(plan.placements, follows),
       ],
       text: text

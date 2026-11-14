@@ -44,7 +44,7 @@ export default function PdfEditPage({
   const scale = width / size.width;
   const pixelsPerUnit = scale * (window.devicePixelRatio || 1);
   const { rasters, requestAnalysis, documentPages } = session;
-  const { flow, placements } = session.pageView(pageNumber);
+  const { flow, placements, backdrops } = session.pageView(pageNumber);
 
   useEffect(() => requestAnalysis(pageNumber), [requestAnalysis, pageNumber]);
 
@@ -53,16 +53,21 @@ export default function PdfEditPage({
     if (!canvas) return;
     let cancelled = false;
 
-    const sources = sourcePages({ flow, placements }, pageNumber, documentPages);
+    const view = { flow, placements, backdrops };
+    const sources = sourcePages(view, pageNumber, documentPages);
+    const paperSources = [...new Set(backdrops.map((backdrop) => backdrop.source.page))];
     const compose = async () => {
-      const loaded = await Promise.all(
-        sources.map(async (page) => [page, await rasters.get(page, pixelsPerUnit)] as const),
-      );
+      const [loaded, paper] = await Promise.all([
+        Promise.all(sources.map(async (page) => [page, await rasters.get(page, pixelsPerUnit)] as const)),
+        Promise.all(
+          paperSources.map(async (page) => [page, await rasters.get(page, pixelsPerUnit, "paper")] as const),
+        ),
+      ]);
       if (cancelled) return;
       // A raster can be evicted, and its surface released, between being
       // handed out and being drawn. Ask again rather than draw from nothing.
-      if (loaded.some(([, raster]) => raster.width === 0)) return compose();
-      draw(canvas, { flow, placements }, new Map(loaded), pageNumber, pixelsPerUnit);
+      if ([...loaded, ...paper].some(([, raster]) => raster.width === 0)) return compose();
+      draw(canvas, view, new Map(loaded), new Map(paper), pageNumber, pixelsPerUnit);
       onRenderSuccessRef.current?.();
     };
     compose().catch((error) => {
@@ -72,7 +77,7 @@ export default function PdfEditPage({
     return () => {
       cancelled = true;
     };
-  }, [flow, placements, rasters, pageNumber, documentPages, pixelsPerUnit]);
+  }, [flow, placements, backdrops, rasters, pageNumber, documentPages, pixelsPerUnit]);
 
   return (
     <div
@@ -109,6 +114,7 @@ function draw(
   canvas: HTMLCanvasElement,
   view: PageView,
   rasters: Map<number, HTMLCanvasElement>,
+  paper: Map<number, HTMLCanvasElement>,
   pageNumber: number,
   pixelsPerUnit: number,
 ): void {
@@ -127,6 +133,13 @@ function draw(
     for (const rect of view.flow?.fixed ?? []) {
       copyStrip(context, own, rect, rect.x, rect.y, pixelsPerUnit, { x: 0, y: 0 });
     }
+  }
+  // Under everything else: what an edited paragraph stood on, without its
+  // words. The words are live text, laid over this.
+  for (const backdrop of view.backdrops) {
+    const source = paper.get(backdrop.source.page);
+    if (!source) continue;
+    copyStrip(context, source, backdrop.source.rect, backdrop.x, backdrop.y, pixelsPerUnit, { x: 0, y: 0 });
   }
   for (const placement of view.placements) {
     const { content } = placement.item;

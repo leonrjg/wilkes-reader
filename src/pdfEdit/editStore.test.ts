@@ -1,0 +1,52 @@
+import { describe, expect, it, vi } from "vitest";
+import { createMemoryPdfEditStore, usableEdits, type DraftEdit } from "./editStore.js";
+
+const paragraph = {
+  page: 2,
+  itemIds: ["2:0:0:3"],
+  area: { x: 50, y: 100, width: 200, height: 30 },
+  splittable: true,
+  text: "Some words.",
+  runs: [{ text: "Some words.", style: 0 }],
+  styles: [{ fontName: "f1", fontSize: 10, color: "black", rise: 0 }],
+  baseStyle: 0,
+  lineCount: 1,
+  firstBaseline: 108,
+  lineHeight: 12,
+  inset: 0,
+  width: 200,
+  indent: 0,
+  fontName: "f1",
+  fontSize: 10,
+  color: "black",
+  align: "left" as const,
+  lines: [],
+};
+const edit: DraftEdit = { paragraph, runs: [{ text: "Other words.", style: 0 }] };
+
+describe("usableEdits", () => {
+  it("takes up a draft this version wrote", () => {
+    expect(usableEdits({ version: 1, edits: [edit] })).toEqual([edit]);
+    expect(usableEdits(null)).toEqual([]);
+  });
+
+  it("lets go of an edit that lacks what laying it out needs, and says so", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { area: _area, ...withoutArea } = paragraph;
+    const older = { paragraph: withoutArea, runs: edit.runs } as unknown as DraftEdit;
+    expect(usableEdits({ version: 1, edits: [older, edit] })).toEqual([edit]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+});
+
+describe("createMemoryPdfEditStore", () => {
+  it("keeps a draft by document and forgets it when there is none", () => {
+    const store = createMemoryPdfEditStore();
+    store.save("a.pdf", { version: 1, edits: [edit] });
+    expect(store.read("a.pdf")?.edits).toEqual([edit]);
+    expect(store.read("b.pdf")).toBeNull();
+    store.save("a.pdf", null);
+    expect(store.read("a.pdf")).toBeNull();
+  });
+});

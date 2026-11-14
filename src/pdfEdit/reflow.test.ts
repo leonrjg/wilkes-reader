@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyEdits, createEdit, editFragments } from "./edits.js";
+import { applyEdits, createEdit, editBackdrops, editFragments } from "./edits.js";
 import type { FlowColumn, FlowItem, PageFlow } from "./flow.js";
 import type { Paragraph } from "./paragraphs.js";
 import { layoutPage, reflowDocument } from "./reflow.js";
@@ -53,6 +53,7 @@ function paragraph(flow: PageFlow, from: number, to: number, splittable = true):
   return {
     page: flow.page,
     itemIds: items.map((item) => item.id),
+    area: { x: first.rect.x, y: first.rect.y, width: 200, height: items.length * (LINE + GAP) - GAP },
     splittable,
     text: "",
     runs: [],
@@ -176,6 +177,42 @@ describe("reflowDocument", () => {
       { page: 1, x: 50, y: 100 + 18 * 12, lines: 2 },
       { page: 2, x: 50, y: 100, lines: 3 },
     ]);
+  });
+
+  it("cuts what a paragraph stood on to the lines it has now", () => {
+    const first = page(1, [column(1, "a", 50, 10, 100)]);
+    // Lines 2..4 (three lines) become five. The paragraph's box is 12 tall per
+    // line here, so it has nothing above its first line or below its last.
+    const edit = edited(first, 2, 5, 5);
+    const reflow = reflowDocument((n) => applyEdits(flows([first])(n), [edit]), [1], 1);
+    const backdrops = editBackdrops(edit, reflow.plans);
+    const top = 100 + 2 * 12;
+    expect(backdrops.map((backdrop) => [backdrop.y, backdrop.source.rect.y])).toEqual([
+      // The first line keeps its own piece; every line added reuses the last
+      // inner line's; the last line gets the original last line's.
+      [top, top],
+      [top + 12, top + 12],
+      [top + 24, top + 12],
+      [top + 36, top + 12],
+      [top + 48, top + 24],
+    ]);
+  });
+
+  it("puts the top and bottom of a box above the first line and below the last", () => {
+    const first = page(1, [column(1, "a", 50, 10, 100)]);
+    const paragraphInBox = paragraph(first, 2, 4);
+    // A box 6 taller than its two lines at each end.
+    paragraphInBox.area = { ...paragraphInBox.area, y: paragraphInBox.area.y - 6, height: 2 * 12 + 12 };
+    const edit = { ...createEdit("e", paragraphInBox), lineCount: 3, ascent: 8 };
+    const reflow = reflowDocument((n) => applyEdits(flows([first])(n), [edit]), [1], 1);
+    const backdrops = editBackdrops(edit, reflow.plans);
+    const lineTop = reflow.plans.get(1)!.placements.find((p) => p.item.id === "e:0")!.y;
+    const head = backdrops.find((backdrop) => backdrop.source.rect.y === paragraphInBox.area.y)!;
+    expect(head).toMatchObject({ y: lineTop - 6 });
+    expect(head.source.rect.height).toBe(6);
+    const tail = backdrops[backdrops.length - 1];
+    expect(tail.y).toBe(lineTop + 3 * 12);
+    expect(tail.source.rect.height).toBe(6);
   });
 
   it("moves a paragraph that cannot be split as one block", () => {
