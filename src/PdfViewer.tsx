@@ -132,6 +132,8 @@ export interface PdfReaderHandle extends FindableReaderHandle, ZoomableReaderHan
    *  text is set among them. Null when not editing or nothing has changed.
    *  Throws when some edited text has no whole font to be saved in. */
   exportEdits: () => PdfEditExport | null;
+  /** Give every changed paragraph back to the page, and forget the changes. */
+  discardEdits: () => void;
 }
 
 const PAGE_GAP_PX = 12;
@@ -316,6 +318,7 @@ export default function PdfViewer({
     pdfAutoZoomTargetPx: autoZoomTargetPx,
     positions,
     resolvePdfFont,
+    pdfEdits,
   } = useReaderHost();
   const isDark = colorScheme === "dark";
   const rootRef = useRef<HTMLDivElement>(null);
@@ -401,6 +404,8 @@ export default function PdfViewer({
     pageMetrics,
     editing && hasPageMetrics,
     resolvePdfFont,
+    documentKey,
+    pdfEdits,
   );
   // The pages there are to lay out: the document's, and while editing any that
   // content was pushed onto past its end. Those take the last page's size.
@@ -1035,6 +1040,7 @@ export default function PdfViewer({
       getPageCount: () => numPages,
       getDocument: () => pdf ?? null,
       exportEdits: () => editSession?.exportEdits() ?? null,
+      discardEdits: () => editSession?.discardEdits(),
       getZoom: () => zoom,
       setZoom: (next) =>
         setZoomKeepingPlace(() =>

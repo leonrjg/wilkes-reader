@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { ResolvePdfFont } from "./pdfEdit/hostFonts.js";
+import type { PdfEditStore } from "./pdfEdit/editStore.js";
 import type { ReaderPositionStore } from "./readerPositions.js";
 
 /** The appearance a reader renders in. The host resolves whatever theme setting
@@ -56,6 +57,10 @@ export interface ReaderHostServices {
    *  screen. Optional: without it, edited text is set in the document's
    *  embedded faces as far as they go, and cannot be exported. */
   resolvePdfFont?: ResolvePdfFont;
+  /** What the reader has changed in each PDF and not saved as a file. Kept by
+   *  the host for as long as it chooses, like `positions`. Optional: without
+   *  it, changes last as long as the reader showing them. */
+  pdfEdits?: PdfEditStore;
 }
 
 const ReaderHostContext = createContext<ReaderHostServices | null>(null);

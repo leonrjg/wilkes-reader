@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "../pdfjs.js";
 import { blankPageFlow, buildPageFlow, resolveDocumentFrame } from "./documentFrame.js";
 import { buildExport, type PdfEditExport, type TypesetText } from "./editExport.js";
+import type { PdfEditStore } from "./editStore.js";
 import { applyEdits, createEdit, editFragments, type EditFragment, type ParagraphEdit } from "./edits.js";
 import type { FlowItem, PageFlow, Placement } from "./flow.js";
 import { useLiveFonts, type LiveFont, type ResolvePdfFont } from "./hostFonts.js";
@@ -20,6 +21,9 @@ import { layoutPage, reflowDocument } from "./reflow.js";
  *
  * Pages are analysed on demand. A cascade that reaches a page nobody has looked
  * at yet stops there, asks for it, and resumes when it arrives.
+ *
+ * What the reader has changed is also written to the host's store as it
+ * changes, and taken up from there when the document is opened again.
  */
 
 /** What a page shows. `placements` is null for a page no edit reaches, which is
@@ -74,6 +78,8 @@ export interface PdfEditSession {
    *  has been changed. Throws when some edited text cannot be saved as it is
    *  shown -- its font has no whole font behind it. */
   exportEdits: () => PdfEditExport | null;
+  /** Give every changed paragraph back to the page. */
+  discardEdits: () => void;
   beginEdit: (paragraph: Paragraph, handoff: Omit<Handoff, "editId">) => void;
   updateEdit: (id: string, patch: Partial<Pick<ParagraphEdit, "runs" | "lineCount" | "ascent">>) => void;
   removeEdit: (id: string) => void;
@@ -93,6 +99,9 @@ export function usePdfEditSession(
   /** The host's way of finding a whole font. Without one, edited text is set
    *  in the page's embedded faces and cannot be exported. */
   resolveFont: ResolvePdfFont | undefined,
+  /** What names the document in the host's store of unsaved edits. */
+  documentKey: string,
+  store: PdfEditStore | undefined,
 ): PdfEditSession | null {
   const [analyses, setAnalyses] = useState<ReadonlyMap<number, PageAnalysis>>(() => new Map());
   const [edits, setEdits] = useState<readonly ParagraphEdit[]>([]);
@@ -102,15 +111,36 @@ export function usePdfEditSession(
   const nextEditId = useRef(1);
   const documentPages = pageSizes.length;
 
-  // A different document is a different session.
+  // A different document is a different session, starting from whatever the
+  // reader had changed in it before.
   const pdfRef = useRef(pdf);
+  const loadedKey = useRef<string | null>(null);
   useEffect(() => {
     pdfRef.current = pdf;
     requested.current = new Set();
     setAnalyses(new Map());
-    setEdits([]);
     setHandoff(null);
-  }, [pdf]);
+    const draft = pdf ? (store?.read(documentKey) ?? null) : null;
+    setEdits(
+      (draft?.edits ?? []).map(({ paragraph, runs }) => ({
+        ...createEdit(`edit-${nextEditId.current++}`, paragraph),
+        runs,
+      })),
+    );
+    loadedKey.current = pdf ? documentKey : null;
+  }, [pdf, documentKey, store]);
+
+  // Written as it changes. Not before this document's own draft has been read:
+  // the edits in state until then are the previous document's.
+  useEffect(() => {
+    if (!store || loadedKey.current !== documentKey) return;
+    store.save(
+      documentKey,
+      edits.length > 0
+        ? { version: 1, edits: edits.map(({ paragraph, runs }) => ({ paragraph, runs })) }
+        : null,
+    );
+  }, [edits, documentKey, store]);
 
   // Rasters are megabytes each and only edit mode composes from them.
   const rasters = useMemo(() => (pdf && active ? new PageRasters(pdf) : null), [pdf, active]);
@@ -227,6 +257,27 @@ export function usePdfEditSession(
     reflow.missing.forEach(requestAnalysis);
   }, [reflow, requestAnalysis]);
 
+  // An edit names the paragraph it replaced. One taken up from a draft is only
+  // as good as that paragraph still being on the page: a file changed on disk
+  // since, or read differently by a later version of the analysis, no longer
+  // has it, and laying the edit out anyway would drop text into the wrong
+  // place. Such an edit is let go, and said to be.
+  useEffect(() => {
+    const stale = edits.filter((edit) => {
+      if (!analyses.has(edit.paragraph.page)) return false;
+      const onPage = model
+        .paragraphsOn(edit.paragraph.page)
+        .find((paragraph) => paragraphKey(paragraph) === paragraphKey(edit.paragraph));
+      return onPage?.text !== edit.paragraph.text;
+    });
+    if (stale.length === 0) return;
+    console.warn(
+      `PDF edit: ${stale.length} unsaved change(s) no longer match the document and were dropped`,
+      stale.map((edit) => ({ page: edit.paragraph.page, was: edit.paragraph.text.slice(0, 60) })),
+    );
+    setEdits((current) => current.filter((edit) => !stale.includes(edit)));
+  }, [edits, analyses, model]);
+
   // Stable, because the editable blocks hold them across renders: one that
   // changed identity with every keystroke would re-run the effects that write
   // and read back the text under the caret.
@@ -250,6 +301,7 @@ export function usePdfEditSession(
     setEdits((current) => current.filter((edit) => edit.id !== id));
   }, []);
   const clearHandoff = useCallback(() => setHandoff(null), []);
+  const discardEdits = useCallback(() => setEdits([]), []);
   const registerTypesetter = useCallback<PdfEditSession["registerTypesetter"]>((editId, typeset) => {
     typesetters.current.set(editId, typeset);
     return () => {
@@ -311,6 +363,7 @@ export function usePdfEditSession(
         return font ? liveFont(font) : null;
       },
       registerTypesetter,
+      discardEdits,
 
       exportEdits: () => {
         if (edits.length === 0) return null;
@@ -338,5 +391,6 @@ export function usePdfEditSession(
     removeEdit,
     liveFont,
     registerTypesetter,
+    discardEdits,
   ]);
 }

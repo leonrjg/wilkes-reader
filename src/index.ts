@@ -30,6 +30,8 @@ export type { PdfViewerProps, PdfReaderHandle, PdfSelection } from "./PdfViewer.
  *  for, and the edited document it is handed back to write. */
 export type { PdfFontRequest, ResolvedPdfFont, ResolvePdfFont } from "./pdfEdit/hostFonts.js";
 export type { PdfEditExport, ExportPage, ExportStrip, ExportText } from "./pdfEdit/editExport.js";
+export { createMemoryPdfEditStore } from "./pdfEdit/editStore.js";
+export type { PdfEditStore, PdfEditDraft, DraftEdit } from "./pdfEdit/editStore.js";
 
 /** What a host supplies when it holds facts the document cannot carry.
  *

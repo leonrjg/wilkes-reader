@@ -40,6 +40,10 @@ interface Box {
 /** Extra width on the text box, so a line the page set full is not wrapped by
  *  a fraction of a pixel of rounding. */
 const WIDTH_SLACK_PX = 1;
+/** How long typing has to pause before what was typed is copied out of the
+ *  DOM. Long enough not to run on every keystroke, short enough that little is
+ *  lost if the reader leaves. */
+const REMEMBER_DELAY_MS = 400;
 /** How much taller a fragment's spacer is than its lines. Any positive amount
  *  under a line height keeps a fragment's last line clear of the float below. */
 const FLOAT_SLACK_PX = 0.5;
@@ -95,6 +99,25 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
     // is a dependency, or every keystroke elsewhere would rewrite this text.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edit.id, updateEdit]);
+
+  // What the paragraph says is the DOM's while it is mounted, and is copied
+  // into the session when typing pauses -- which is when it reaches the
+  // host's store, so a reader who closes the document mid-sentence finds the
+  // sentence there.
+  const remember = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rememberSoon = () => {
+    if (remember.current) clearTimeout(remember.current);
+    remember.current = setTimeout(() => {
+      const text = textRef.current;
+      if (text) updateEdit(edit.id, { runs: readRuns(text, paragraph) });
+    }, REMEMBER_DELAY_MS);
+  };
+  useEffect(
+    () => () => {
+      if (remember.current) clearTimeout(remember.current);
+    },
+    [],
+  );
 
   // Taken over from the page mid-keystroke: put the caret back where it was
   // over the page's rendering, then let the keystroke happen.
@@ -186,7 +209,10 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
           textAlign: paragraph.align,
           textIndent: paragraph.indent * scale,
         }}
-        onInput={measure}
+        onInput={() => {
+          measure();
+          rememberSoon();
+        }}
         onBlur={(event) => {
           const runs = readRuns(event.currentTarget, paragraph);
           // Back to what the page says: give the paragraph back to the page,
