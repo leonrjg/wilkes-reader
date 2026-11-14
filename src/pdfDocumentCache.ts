@@ -101,7 +101,15 @@ export function loadPdfDocument(source: PdfDocumentSource): Promise<PDFDocumentP
   // main-thread parse with nothing to say so.
   GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
 
-  const loadingTask = getDocument({ ...pdfjsReadFrom(source), ...pdfjsAssetUrls() });
+  // Fonts are kept whole once loaded -- the file pdf.js made of each, and
+  // which of its codes is which character -- because editing types in them
+  // (`pdfEdit/ownFaces`). Without this pdf.js lets go of both once a font is
+  // registered for drawing.
+  const loadingTask = getDocument({
+    ...pdfjsReadFrom(source),
+    ...pdfjsAssetUrls(),
+    fontExtraProperties: true,
+  });
   const entry: CacheEntry = { proxy: null, promise: loadingTask.promise, loadingTask };
   entry.promise = loadingTask.promise.then(
     (proxy) => {

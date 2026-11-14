@@ -53,10 +53,18 @@ export function selectText(root: Node, anchor: number, focus: number): void {
  *  is top to bottom except where a paragraph goes on at the head of the next
  *  column. Several client rects on one line -- one per text node, one per
  *  justified word, a superscript sitting higher than its neighbours -- are one
- *  line. */
+ *  line.
+ *
+ *  Whether a box is on a line is judged against the smallest box on the line
+ *  so far -- its ordinary text -- not against everything the line holds: a
+ *  font with tall metrics, a maths font whose bounds are its largest bracket,
+ *  reports a box for a single parenthesis that reaches well into the line
+ *  below, and the line below would overlap that by more than half. */
 export function lineRects(root: Node): DOMRect[] {
   const range = document.createRange();
   const lines: DOMRect[] = [];
+  // Each line's smallest box.
+  const cores: DOMRect[] = [];
   // Text node by text node: a range over the whole element would also report
   // the boxes of the elements in it, and those not in the order of the text.
   const rects = textNodes(root).flatMap((node) => {
@@ -66,12 +74,15 @@ export function lineRects(root: Node): DOMRect[] {
   for (const rect of rects) {
     if (rect.height === 0) continue;
     const line = lines[lines.length - 1];
-    const overlap = line ? Math.min(line.bottom, rect.bottom) - Math.max(line.top, rect.top) : 0;
+    const core = cores[cores.length - 1];
+    const overlap = core ? Math.min(core.bottom, rect.bottom) - Math.max(core.top, rect.top) : 0;
     // Further along the same line, not back at the start of one beside it.
-    if (!line || overlap <= Math.min(line.height, rect.height) / 2 || rect.right < line.left) {
+    if (!line || overlap <= Math.min(core.height, rect.height) / 2 || rect.right < line.left) {
       lines.push(DOMRect.fromRect(rect));
+      cores.push(rect);
       continue;
     }
+    if (rect.height < core.height) cores[cores.length - 1] = rect;
     const left = Math.min(line.left, rect.left);
     const right = Math.max(line.right, rect.right);
     const top = Math.min(line.top, rect.top);

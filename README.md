@@ -114,15 +114,16 @@ if (edits) await myBackend.writePdf(sourcePath, edits);
 
 `exportEdits()` returns, for each page that changed, which areas of which
 source pages are drawn where (`strips`) and which runs of text sit on which
-baselines in which font (`text`). The reader broke the lines and laid out the
-pages, so whoever writes the file computes nothing: it copies areas and sets
-text where it is told. `discardEdits()` gives everything back to the page.
+baselines in which font (`text`), and the files of the fonts the host did not
+supply (`fonts`): the document's own, rebuilt so that they can be typed in. The
+reader broke the lines and laid out the pages, so whoever writes the file
+computes nothing: it copies areas and sets text where it is told. `discardEdits()` gives everything back to the page.
 
 Three things come from the host, all optional:
 
 | On `ReaderHostProvider` / `PdfViewer` | Without it |
 | --- | --- |
-| `resolvePdfFont(font)` — a whole, installed font standing in for one the document names. A PDF embeds *subsets* of its fonts, so typed text needs a whole one, and the host saves with the same file | Edited text is set in the embedded faces as far as they go, and `exportEdits()` rejects |
+| `resolvePdfFont(font)` — a whole, installed font for one the document names. Edited text is set in the document's own embedded fonts, but a PDF embeds *subsets*: a character the document never used is set in this, unless it is the document's font itself, which is then used alone. The host saves with the same files | Edited text is set in the embedded faces as far as they go, and `exportEdits()` rejects what they cannot set |
 | `pdfEdits` — a store for unsaved edits, keyed like `positions` | Edits last as long as the viewer showing them |
 | `textSubstitutions` — the areas the host's reading knows are formulas or tables | Nothing is locked: a formula can be cut between two of its rows, and offered as prose |
 
@@ -147,6 +148,7 @@ It lives in `src/pdfEdit/`, in layers that each know about one thing:
 | `relocation.ts` | Where an area or a point of the original page is drawn now |
 | `editExport.ts`, `typeset.ts` | The edited document as areas and text, read back off the screen |
 | `editStore.ts`, `hostFonts.ts` | What crosses to the host: unsaved edits, and fonts |
+| `ownFaces.ts`, `sfnt.ts` | The document's own fonts, given a Unicode character map so they can be typed in |
 | `fontNames.ts` | What a font's PostScript name says of it, which a file's flags often do not: serif or sans, bold, italic |
 | `pdfPageSource.ts` | The only module that touches pdf.js |
 | `usePdfEditSession.ts` | The state: what is known about the pages, and what was changed |
@@ -170,9 +172,9 @@ What it does not do:
   nowhere to be drawn and is passed over.
 - **Type in a style of its own.** Bold and italic apply to a selection; there
   is no pending style for the next character, and no change of size or colour.
-- **Fall back for a missing character.** A character the paragraph's font does
-  not have is drawn by the browser in some other font, and is not what a host
-  will be able to save.
+- **Fall back for a missing character.** A character neither the document's
+  font nor the host's has is drawn by the browser in some other font, and is
+  saved as the host font's empty box.
 - **Find structure the host did not name.** Paragraphs, columns and running
   heads are found by geometry. A scanned page is one unbreakable block, and a
   note set in the margin beside a line is read as the end of that line. A
@@ -182,18 +184,20 @@ What it does not do:
 - **Set a formula again.** A formula in the middle of a sentence is letters
   from a mathematical font, or not letters at all but drawings. Unless the
   host names it in `textSubstitutions`, its paragraph is offered as prose:
-  typed into, its symbols are set in the stand-in font with the words -- an
-  italic variable as a plain letter of another face, a symbol as whatever
-  character the file's encoding claims it is -- and what was drawn stays where
-  it was while the words move away from it.
+  typed into, its letters and symbols are set again one after another in the
+  document's mathematical fonts, without the spacing, raising and stacking the
+  formula had, and what was drawn stays where it was while the words move away
+  from it.
 - **Move what is drawn behind a word with the word.** The tint behind a
   paragraph is kept under its new lines; the shading behind one phrase of it --
   inline code, a highlight -- is kept where the phrase was.
-- **Look like the page it replaces.** An edited paragraph is set in an
-  installed font. Few documents are set in one: a book in Source Sans or
-  Computer Modern comes back in the system's sans-serif or serif at the same
-  size, weight and slant, wider or narrower than it was, and breaks its lines
-  elsewhere.
+- **Type every character in the document's face.** An edited paragraph is set
+  in the document's own fonts, but those hold only the characters the document
+  used. A character one lacks -- a capital never used in a heading set in
+  capitals, a symbol -- is set in the host's font for the same family, size,
+  weight and slant, and looks it. So is a word made bold in a font whose bold
+  the document never used. And the words of a paragraph that is typed in are
+  spaced as the browser spaces them, not as the page did.
 - **Restart an input method's composition.** A composition begun in a paragraph
   the page still draws starts over once the paragraph is live text.
 

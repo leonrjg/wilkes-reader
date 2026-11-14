@@ -55,14 +55,16 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   if (boxes.length > 0) lastBoxes.current = boxes;
   const shown = lastBoxes.current;
 
-  const liveFontOf = (style: RunStyle) => session.liveFontOf(style);
-  const faceOf = (style: RunStyle) => liveFace(session.fontOf(style.fontName), liveFontOf(style));
+  const liveFontsOf = (style: RunStyle) => session.liveFontsOf(style);
+  const faceOf = (style: RunStyle) => liveFace(session.fontOf(style.fontName), liveFontsOf(style));
   const textStyle = {
     ...paragraphTextStyle(paragraph, faceOf(paragraph.styles[paragraph.baseStyle]), scale),
     color: paragraph.color,
   };
-  // Which whole fonts have arrived: a string, so an effect can depend on it.
-  const facesReady = paragraph.styles.map((style) => liveFontOf(style)?.family ?? "").join("|");
+  // Which fonts have arrived: a string, so an effect can depend on it.
+  const facesReady = paragraph.styles
+    .map((style) => liveFontsOf(style).map((font) => font.family).join(","))
+    .join("|");
 
   // What the text says now. Read against the paragraph as it is when asked,
   // not as it was when whoever asks was set up: its styles can have grown.
@@ -201,7 +203,7 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
       paragraph,
       fragments: session.fragmentsOf(edit),
       ascent: edit.ascent ?? estimatedAscent(paragraph),
-      fontId: (style) => liveFontOf(style)?.id ?? null,
+      fontsOf: liveFontsOf,
       styleOf: (node) => styleIndexOf(text, node, paragraph),
       toPage: (page, clientX) => (clientX - origin) / (geometryOf(page)?.scale ?? scale),
     });

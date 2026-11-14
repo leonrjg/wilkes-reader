@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
+import { readCharacterMap, spaceAdvance } from "./sfnt.js";
 
 /**
  * Whole fonts for edited text, from the host.
  *
- * A PDF's embedded fonts are subsets, so text a reader types is set in a whole
- * font the host resolves -- and the host saves the document with the same
- * file, which is what makes the saved line breaks the ones on screen. This is
- * where those fonts are asked for and registered with the browser.
+ * A PDF's embedded fonts are subsets. Text a reader types is set in the
+ * document's own font where it has the glyphs (`ownFaces`), and in a whole
+ * font the host resolves where it does not -- or in that alone, when the host
+ * has the document's font itself. The host saves the document with the same
+ * files, which is what makes the saved line breaks the ones on screen. This is
+ * where the host's fonts are asked for, and where every font edited text is
+ * set in is registered with the browser.
  */
 
 /** A font as a document names it. */
@@ -31,10 +35,20 @@ export interface ResolvedPdfFont {
 
 export type ResolvePdfFont = (font: PdfFontRequest) => Promise<ResolvedPdfFont>;
 
-/** A resolved font, registered: the id to save with, the family to draw with. */
+/** A font edited text can be set in, registered: the id to save with, the
+ *  family to draw with, and the characters it can draw. */
 export interface LiveFont {
   id: string;
   family: string;
+  covers: ReadonlySet<number>;
+  /** How wide a space is in this font, in ems, if that is known. */
+  space?: number;
+  /** The host found the very font the document asked for, whole: nothing
+   *  else needs to be laid under it. */
+  exact?: boolean;
+  /** A font the host did not supply -- the document's own, made typeable --
+   *  is sent to it with the edits, to be saved in. */
+  file?: Uint8Array;
 }
 
 const requestKey = (font: PdfFontRequest) =>
@@ -42,17 +56,62 @@ const requestKey = (font: PdfFontRequest) =>
 
 // `document.fonts` is one set for the whole page, so what has been added to it
 // is remembered for the whole page too: two documents set in Times New Roman
-// share one face.
-const families = new Map<string, string>();
+// share one face. A font of a document's own is known by the object it was
+// made into, since two documents can each have a different "Times" subset.
+const families = new Map<object | string, LiveFont>();
 
-function register(font: ResolvedPdfFont): LiveFont {
-  let family = families.get(font.id);
-  if (!family) {
-    family = `pdf-edit-${families.size}`;
-    families.set(font.id, family);
-    document.fonts.add(new FontFace(family, font.data));
+/** Add a font file to the page's fonts, once per `key`. */
+export function registerFont(
+  key: object | string,
+  id: string,
+  data: Uint8Array | ArrayBuffer,
+  space?: number,
+): LiveFont {
+  let live = families.get(key);
+  if (!live) {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    live = {
+      id,
+      family: `pdf-edit-${families.size}`,
+      covers: charactersOf(id, bytes),
+      space: space ?? spaceOf(id, bytes),
+    };
+    families.set(key, live);
+    // A copy: the font set may hold on to the buffer it is given.
+    document.fonts.add(new FontFace(live.family, bytes.slice()));
   }
-  return { id: font.id, family };
+  return live;
+}
+
+/** The characters a font has glyphs for. One whose map cannot be read is
+ *  still drawn, and taken to have them all: the browser will say otherwise. */
+function charactersOf(id: string, font: Uint8Array): ReadonlySet<number> {
+  try {
+    return new Set(readCharacterMap(font).keys());
+  } catch (error) {
+    console.warn(`PDF edit: which characters font ${id} has could not be read:`, error);
+    return EVERY_CHARACTER;
+  }
+}
+
+function spaceOf(id: string, font: Uint8Array): number | undefined {
+  try {
+    return spaceAdvance(font) ?? undefined;
+  } catch (error) {
+    console.warn(`PDF edit: how wide a space is in font ${id} could not be read:`, error);
+    return undefined;
+  }
+}
+
+const EVERY_CHARACTER: ReadonlySet<number> = new (class extends Set<number> {
+  has(): boolean {
+    return true;
+  }
+})();
+
+function register(font: ResolvedPdfFont, request: PdfFontRequest): LiveFont {
+  const live = registerFont(font.id, font.id, font.data);
+  return !request.sibling && request.name !== "" && font.id === request.name ? { ...live, exact: true } : live;
 }
 
 /** Resolve every font in `wanted` through the host, and answer which are
@@ -72,7 +131,7 @@ export function useLiveFonts(
       asked.add(key);
       resolve(font).then(
         (resolved) => {
-          const live = register(resolved);
+          const live = register(resolved, font);
           setReady((known) => new Map(known).set(key, live));
         },
         (error) => {

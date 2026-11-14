@@ -16,7 +16,14 @@ import {
   type ParagraphEdit,
 } from "./edits.js";
 import type { FlowItem, PageFlow, Placement } from "./flow.js";
-import { useLiveFonts, type LiveFont, type PdfFontRequest, type ResolvePdfFont } from "./hostFonts.js";
+import {
+  registerFont,
+  useLiveFonts,
+  type LiveFont,
+  type PdfFontRequest,
+  type ResolvePdfFont,
+} from "./hostFonts.js";
+import type { OwnFace } from "./ownFaces.js";
 import {
   adoptRuns,
   paragraphAfter,
@@ -127,8 +134,11 @@ export interface PdfEditSession {
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
   /** What is known of a font, by the name the file gives it. */
   fontOf: (fontName: string) => FontInfo;
-  /** The whole font the host resolved a style to, once it has. */
-  liveFontOf: (style: RunStyle) => LiveFont | null;
+  /** The fonts a style's edited text is set in, first choice first: the
+   *  document's own font, for the characters it has, over the whole font the
+   *  host resolved -- or that alone, when it is the document's font itself.
+   *  Empty while neither is known. */
+  liveFontsOf: (style: RunStyle) => LiveFont[];
   /** Set a paragraph in other type: it says `runs`, written against `styles`
    *  -- its own table of styles, with any new one added at its end. The
    *  selection is put back over the text it covered. */
@@ -187,6 +197,49 @@ const DEFAULT_FONT: FontInfo = { name: "", face: "", generic: "serif", bold: fal
 /** What a host is asked for a font by: what is known of it, less the name
  *  pdf.js has for its embedded face, which means nothing outside this page. */
 const requestOf = ({ face: _face, ...font }: FontInfo): PdfFontRequest => font;
+
+/** The family a PostScript name says a font is of: what comes before its
+ *  style, without a subset's tag. `ABCDEF+SourceSansPro-Bold` is a
+ *  `SourceSansPro`. */
+const familyOf = (name: string) => name.replace(/^[A-Z]{6}\+/, "").split(/[-,]/)[0].toLowerCase();
+
+/** The document's own font a style is set in, made typeable, if it has one:
+ *  the style's font itself -- or, for a word the reader made bold or italic,
+ *  the face of the same family the document has in that weight and slant. */
+function ownFontOf(
+  fontName: string,
+  request: PdfFontRequest,
+  fonts: ReadonlyMap<string, FontInfo>,
+  faces: ReadonlyMap<string, OwnFace>,
+  files: Map<string, Uint8Array>,
+): LiveFont | null {
+  let name: string | undefined = fontName;
+  if (request.sibling) {
+    const family = familyOf(fontName);
+    name = [...fonts].find(
+      ([candidate, font]) =>
+        faces.has(candidate) &&
+        familyOf(candidate) === family &&
+        font.bold === request.bold &&
+        font.italic === request.italic,
+    )?.[0];
+  }
+  const face = name === undefined ? undefined : faces.get(name);
+  if (!face || name === undefined) return null;
+  const id = `own:${name}`;
+  files.set(id, face.data);
+  return { ...registerFont(face, id, face.data, face.space), file: face.data };
+}
+
+/** Bytes as base64, a piece at a time: one call with them all would put every
+ *  byte on the stack as an argument. */
+function base64Of(bytes: Uint8Array): string {
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  }
+  return btoa(binary);
+}
 
 const NO_BACKDROPS: Backdrop[] = [];
 /** How many pages past the one a cascade is waiting on are analysed with it. */
@@ -547,6 +600,17 @@ export function usePdfEditSession(
     }
     return known;
   }, [analyses]);
+  // The files of the document's own fonts edited text has been set in, by the
+  // id each is saved under.
+  const ownFiles = useRef(new Map<string, Uint8Array>());
+  // Which of them can be typed in as the document has them.
+  const faces = useMemo(() => {
+    const known = new Map<string, OwnFace>();
+    for (const analysis of analyses.values()) {
+      for (const [name, face] of analysis.faces) if (!known.has(name)) known.set(name, face);
+    }
+    return known;
+  }, [analyses]);
   const fontsInUse = useMemo(() => {
     const unique = new Map<string, PdfFontRequest>();
     const want = (request: PdfFontRequest) => unique.set(JSON.stringify(request), request);
@@ -765,9 +829,14 @@ export function usePdfEditSession(
 
       fragmentsOf: (edit) => editFragments(edit, reflow.plans),
       fontOf: (fontName) => fonts.get(fontName) ?? DEFAULT_FONT,
-      liveFontOf: (style) => {
+      liveFontsOf: (style) => {
         const font = fonts.get(style.fontName);
-        return font ? liveFont(fontRequestOf(style, requestOf(font))) : null;
+        if (!font) return [];
+        const request = fontRequestOf(style, requestOf(font));
+        const host = liveFont(request);
+        if (host?.exact) return [host];
+        const own = ownFontOf(style.fontName, request, fonts, faces, ownFiles.current);
+        return own && host ? [own, host] : own ? [own] : host ? [host] : [];
       },
       retype,
       registerTypesetter,
@@ -793,7 +862,14 @@ export function usePdfEditSession(
         for (const backdrop of current.flatMap((edit) => editBackdrops(edit, complete.plans))) {
           standing.set(backdrop.page, [...(standing.get(backdrop.page) ?? []), backdrop]);
         }
-        return buildExport(complete.plans, read.flowOf, read.follows, text, standing);
+        const built = buildExport(complete.plans, read.flowOf, read.follows, text, standing);
+        // The document's own fonts go with the edits: the host has no other
+        // way to them.
+        const used = new Set(text.map((chunk) => chunk.font));
+        const files = [...ownFiles.current.entries()].filter(([id]) => used.has(id));
+        return files.length > 0
+          ? { ...built, fonts: files.map(([id, file]) => ({ id, data: base64Of(file) })) }
+          : built;
       },
 
       beginEdit,
@@ -815,6 +891,7 @@ export function usePdfEditSession(
     updateEdit,
     removeEdit,
     liveFont,
+    faces,
     registerTypesetter,
     discardEdits,
     lookAhead,

@@ -17,6 +17,9 @@ export interface FaceStyle {
   fontFamily: string;
   fontWeight: "bold" | "normal";
   fontStyle: "italic" | "normal";
+  /** Set where spaces come from another font than the text's own, to make
+   *  them as wide as the text's own would be. */
+  wordSpacing?: string;
 }
 
 /** The size and leading of a paragraph's type, in a given face. */
@@ -41,11 +44,25 @@ export function pageFace(font: FontInfo): FaceStyle {
   };
 }
 
-/** The font edited text is set in: the whole font the host resolved, which is
- *  the file it will also save with. It is already the bold or the italic, so
- *  nothing is asked of the browser on top. Until the host has answered -- or
- *  when there is no host to ask -- it is the page's face. */
-export function liveFace(font: FontInfo, live: LiveFont | null): FaceStyle {
-  if (!live) return pageFace(font);
-  return { fontFamily: `"${live.family}", ${font.generic}`, fontWeight: "normal", fontStyle: "normal" };
+/** The fonts edited text is set in, each the file it will also be saved in:
+ *  the browser takes each character from the first that has it, and so does
+ *  the typesetter (`typeset`). Each is already the bold or the italic, so
+ *  nothing is asked of the browser on top. Until any is known it is the
+ *  page's face. */
+export function liveFace(font: FontInfo, live: readonly LiveFont[]): FaceStyle {
+  if (live.length === 0) return pageFace(font);
+  const face: FaceStyle = {
+    fontFamily: [...live.map((each) => `"${each.family}"`), font.generic].join(", "),
+    fontWeight: "normal",
+    fontStyle: "normal",
+  };
+  // A subset often has no space -- the document only ever left a gap -- and
+  // the browser then takes one from the next font, at that font's width.
+  const [own] = live;
+  const drawn = live.find((each) => each.covers.has(0x20));
+  if (!own.covers.has(0x20) && own.space !== undefined && drawn?.space !== undefined) {
+    const difference = own.space - drawn.space;
+    if (Math.abs(difference) > 0.001) face.wordSpacing = `${difference}em`;
+  }
+  return face;
 }

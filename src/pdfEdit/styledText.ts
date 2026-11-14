@@ -48,6 +48,7 @@ function applyStyle(
     span.style.fontFamily = face.fontFamily;
     span.style.fontWeight = face.fontWeight;
     span.style.fontStyle = face.fontStyle;
+    span.style.wordSpacing = face.wordSpacing ?? "";
   }
   if (style.fontSize !== base.fontSize) span.style.fontSize = `${style.fontSize / base.fontSize}em`;
   if (style.color !== base.color) span.style.color = style.color;

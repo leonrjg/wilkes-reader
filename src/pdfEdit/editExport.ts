@@ -14,6 +14,14 @@ import type { PagePlan } from "./reflow.js";
  */
 export interface PdfEditExport {
   pages: ExportPage[];
+  /** Fonts the text is set in that the host did not supply -- the document's
+   *  own, made typeable -- with their files, base64. */
+  fonts?: ExportFont[];
+}
+
+export interface ExportFont {
+  id: string;
+  data: string;
 }
 
 /** One changed page. Everything is in the page's own units, origin top-left. */
@@ -41,7 +49,8 @@ export interface ExportText {
   x: number;
   baseline: number;
   text: string;
-  /** The id the host resolved this text's font to. */
+  /** The font this text is set in: one the host resolved, or one of
+   *  `fonts`. */
   font: string;
   size: number;
   color: [number, number, number];

@@ -4,6 +4,7 @@ import { installReadableStreamAsyncIterator } from "../readableStreamAsyncIterat
 import { faceFromName } from "./fontNames.js";
 import type { PdfFontRequest } from "./hostFonts.js";
 import { inkGridFromImage } from "./inkGrid.js";
+import { ownFaceOf, type LoadedFontFile, type OwnFace } from "./ownFaces.js";
 import { layoutFromInk, type PageLayout } from "./pageLayout.js";
 import type { TextRun } from "./paragraphs.js";
 
@@ -26,6 +27,9 @@ export interface PageAnalysis {
   runs: TextRun[];
   /** The fonts the page's runs are in, by the name each run has for its. */
   fonts: Map<string, FontInfo>;
+  /** Those of them that can be typed in as they are (`ownFaces`), by the
+   *  same name. */
+  faces: Map<string, OwnFace>;
 }
 
 /** Pixels per page unit the layout is read at. Fixed, so a page's analysis is
@@ -112,6 +116,7 @@ export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Pr
   const toPage = page.getViewport({ scale: 1 }).transform;
   const runs: TextRun[] = [];
   const fonts = new Map<string, FontInfo>();
+  const faces = new Map<string, OwnFace>();
   // pdf.js's name for each font, to the name the runs are given for it.
   const named = new Map<string, string>();
   for (const item of content.items) {
@@ -126,6 +131,7 @@ export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Pr
       fontName = font.name;
       named.set(item.fontName, fontName);
       if (!fonts.has(fontName)) fonts.set(fontName, font.info);
+      if (font.own && !faces.has(fontName)) faces.set(fontName, font.own);
     }
     runs.push({
       text: item.str,
@@ -142,7 +148,7 @@ export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Pr
       }),
     });
   }
-  return { layout, runs, fonts };
+  return { layout, runs, fonts, faces };
 }
 
 /** The colour a run is set in: the darkest thing drawn where it sits. Read
@@ -173,7 +179,7 @@ function inkColour(
 }
 
 /** What pdf.js exposes of a font it loaded. */
-interface LoadedFont {
+interface LoadedFont extends LoadedFontFile {
   name?: string;
   fallbackName?: string;
   bold?: boolean;
@@ -198,7 +204,7 @@ function fontOf(
   page: PDFPageProxy,
   face: string,
   fallback: string | undefined,
-): { name: string; info: FontInfo } {
+): { name: string; info: FontInfo; own: OwnFace | null } {
   const loaded = page.commonObjs.has(face) ? (page.commonObjs.get(face) as LoadedFont | null) : null;
   const fileName = loaded?.name ?? "";
   // A subset is named `ABCDEF+RealName`.
@@ -207,6 +213,7 @@ function fontOf(
   const family = loaded?.fallbackName ?? fallback ?? "serif";
   return {
     name: fileName || face,
+    own: loaded ? ownFaceOf(loaded) : null,
     info: {
       name,
       face,
