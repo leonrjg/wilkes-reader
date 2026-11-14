@@ -13,6 +13,8 @@ import type { TextRun } from "./paragraphs.js";
 
 /** How a run's embedded font should be asked for in CSS. */
 export interface FontInfo {
+  /** The font's own name in the file, without a subset's random prefix. */
+  name: string;
   /** The generic family pdf.js would fall back to. */
   fallback: string;
   bold: boolean;
@@ -121,17 +123,28 @@ function inkColour(
   return `rgb(${image.data[darkest]}, ${image.data[darkest + 1]}, ${image.data[darkest + 2]})`;
 }
 
+/** What pdf.js exposes of a font it loaded. */
+interface LoadedFont {
+  name?: string;
+  fallbackName?: string;
+  bold?: boolean;
+  black?: boolean;
+  italic?: boolean;
+}
+
 /** pdf.js registers an embedded font under a generated name and with no weight
  *  or style, so the only record of either is the font's own PostScript name. */
 function fontInfo(page: PDFPageProxy, fontName: string, fallback: string | undefined): FontInfo {
   const loaded = page.commonObjs.has(fontName)
-    ? (page.commonObjs.get(fontName) as { name?: string } | null)
+    ? (page.commonObjs.get(fontName) as LoadedFont | null)
     : null;
-  const name = loaded?.name ?? "";
+  // A subset is named `ABCDEF+RealName`.
+  const name = (loaded?.name ?? "").replace(/^[A-Z]{6}\+/, "");
   return {
-    fallback: fallback ?? "serif",
-    bold: /bold|black|heavy|semibold|demi|(?:^|[+-])cmbx/i.test(name),
-    italic: /italic|oblique|(?:^|[+-])cm(?:ti|sl)/i.test(name),
+    name,
+    fallback: loaded?.fallbackName ?? fallback ?? "serif",
+    bold: Boolean(loaded?.bold || loaded?.black) || /bold|black|heavy|semibold|demi|^cmbx/i.test(name),
+    italic: Boolean(loaded?.italic) || /italic|oblique|^cm(?:ti|sl)/i.test(name),
   };
 }
 

@@ -28,6 +28,22 @@ export interface TextRun {
   color: string;
 }
 
+/** How a stretch of text is set. */
+export interface RunStyle {
+  /** The name pdf.js loaded the embedded font under. */
+  fontName: string;
+  fontSize: number;
+  color: string;
+  /** How far its baseline sits above the line's: positive for a superscript. */
+  rise: number;
+}
+
+/** A stretch of a paragraph's text in one style, by index into its `styles`. */
+export interface StyledRun {
+  text: string;
+  style: number;
+}
+
 /** One line of a paragraph as the page set it. */
 export interface ParagraphLine {
   /** The item whose strip of the page this line is on. */
@@ -55,6 +71,14 @@ export interface Paragraph {
    *  then be split between two places, and it moves as one block. */
   splittable: boolean;
   text: string;
+  /** The same text, as the runs of type it is set in. A paragraph is rarely
+   *  one style: an italic phrase, a citation raised above the line, a symbol
+   *  from another face. Editing it must not flatten those. */
+  runs: StyledRun[];
+  styles: RunStyle[];
+  /** The style most of the paragraph is in, and that the three fields below
+   *  repeat: what new text is set in when there is nothing beside it to match. */
+  baseStyle: number;
   lineCount: number;
   firstBaseline: number;
   /** Baseline to baseline. */
@@ -73,8 +97,14 @@ export interface Paragraph {
   lines: ParagraphLine[];
 }
 
+interface Segment {
+  text: string;
+  style: RunStyle;
+}
+
 interface Line {
   text: string;
+  segments: Segment[];
   baseline: number;
   left: number;
   right: number;
@@ -96,6 +126,8 @@ const WORD_GAP_EMS = 0.2;
 /** Baselines within this many ems are one line: a superscript does not start
  *  a line of its own. */
 const SAME_LINE_EMS = 0.5;
+/** A baseline this many ems off the line's is noise, not a raised character. */
+const RISE_TOLERANCE_EMS = 0.05;
 
 export function paragraphsOf(flow: PageFlow, runs: TextRun[]): Paragraph[] {
   const paragraphs: Paragraph[] = [];
@@ -177,11 +209,14 @@ function linesOf(item: FlowItem, runs: TextRun[]): Line[] {
   const lines: TextRun[][] = [];
   for (const run of inside) {
     const current = lines[lines.length - 1];
-    if (current && run.baseline - dominant(current).baseline <= SAME_LINE_EMS * dominant(current).fontSize) {
-      current.push(run);
-    } else {
-      lines.push([run]);
-    }
+    const reference = current && dominant(current);
+    // Measured against the larger of the two sizes: a raised character sorts
+    // ahead of the line it belongs to, and is small.
+    const sameLine =
+      reference !== undefined &&
+      run.baseline - reference.baseline <= SAME_LINE_EMS * Math.max(run.fontSize, reference.fontSize);
+    if (sameLine) current.push(run);
+    else lines.push([run]);
   }
   return lines.map(lineFrom).filter((line) => line.text.length > 0);
 }
@@ -194,17 +229,26 @@ function dominant(runs: TextRun[]): TextRun {
 function lineFrom(runs: TextRun[]): Line {
   const ordered = [...runs].sort((a, b) => a.x - b.x);
   const main = dominant(ordered);
+  const segments: Segment[] = [];
   let text = "";
   let right = -Infinity;
   for (const run of ordered) {
-    const spaced = text.endsWith(" ") || run.text.startsWith(" ");
-    if (text && !spaced && run.x - right > WORD_GAP_EMS * main.fontSize) text += " ";
-    text += run.text;
+    let piece = run.text.replace(/\s+/g, " ");
+    // Whitespace is collapsed against what is already there: none opens a
+    // line, none follows a space, and a visible gap between two runs is one.
+    if (text === "" || text.endsWith(" ")) piece = piece.replace(/^ /, "");
+    else if (!piece.startsWith(" ") && run.x - right > WORD_GAP_EMS * main.fontSize) piece = ` ${piece}`;
     right = Math.max(right, run.x + run.width);
+    if (piece === "") continue;
+    text += piece;
+    appendSegment(segments, piece, styleOf(run, main));
   }
+  if (text.endsWith(" ")) dropLastCharacter(segments);
+
   const inked = ordered.filter((run) => run.text.trim().length > 0);
   return {
-    text: text.replace(/\s+/g, " ").trim(),
+    text: text.trimEnd(),
+    segments,
     baseline: main.baseline,
     left: inked.length > 0 ? Math.min(...inked.map((run) => run.x)) : main.x,
     right: inked.length > 0 ? Math.max(...inked.map((run) => run.x + run.width)) : main.x,
@@ -212,6 +256,69 @@ function lineFrom(runs: TextRun[]): Line {
     fontName: main.fontName,
     color: main.color,
   };
+}
+
+function styleOf(run: TextRun, main: TextRun): RunStyle {
+  const rise = main.baseline - run.baseline;
+  return {
+    fontName: run.fontName,
+    fontSize: Math.round(run.fontSize * 100) / 100,
+    color: run.color,
+    rise: Math.abs(rise) < RISE_TOLERANCE_EMS * main.fontSize ? 0 : Math.round(rise * 100) / 100,
+  };
+}
+
+const styleKey = (style: RunStyle) =>
+  `${style.fontName}|${style.fontSize}|${style.color}|${style.rise}`;
+
+function appendSegment(segments: Segment[], text: string, style: RunStyle): void {
+  const last = segments[segments.length - 1];
+  if (last && styleKey(last.style) === styleKey(style)) last.text += text;
+  else segments.push({ text, style });
+}
+
+/** The style most of the text is in. */
+function dominantStyle(segments: Segment[]): RunStyle {
+  const weight = new Map<string, { style: RunStyle; characters: number }>();
+  for (const { text, style } of segments) {
+    const entry = weight.get(styleKey(style)) ?? { style, characters: 0 };
+    entry.characters += text.length;
+    weight.set(styleKey(style), entry);
+  }
+  return [...weight.values()].reduce((best, entry) =>
+    entry.characters > best.characters ? entry : best,
+  ).style;
+}
+
+/** Give the space at the edge of an inline phrase to the plain text beside
+ *  it. A space set in a superscript's size is narrower than the one the
+ *  reader typed, and one left inside an italic run makes the run's edge
+ *  somewhere a caret cannot visibly be. */
+function settleSpaces(segments: Segment[], base: RunStyle): Segment[] {
+  const settled = segments.map((segment) => ({ ...segment }));
+  const isBase = (segment: Segment | undefined) =>
+    segment !== undefined && styleKey(segment.style) === styleKey(base);
+  settled.forEach((segment, index) => {
+    if (isBase(segment)) return;
+    const before = settled[index - 1];
+    const after = settled[index + 1];
+    if (segment.text.startsWith(" ") && isBase(before)) {
+      segment.text = segment.text.slice(1);
+      before.text += " ";
+    }
+    if (segment.text.endsWith(" ") && isBase(after)) {
+      segment.text = segment.text.slice(0, -1);
+      after.text = ` ${after.text}`;
+    }
+  });
+  return settled.filter((segment) => segment.text !== "");
+}
+
+function dropLastCharacter(segments: Segment[]): void {
+  const last = segments[segments.length - 1];
+  if (!last) return;
+  last.text = last.text.slice(0, -1);
+  if (last.text === "") segments.pop();
 }
 
 function paragraphFrom(
@@ -223,11 +330,19 @@ function paragraphFrom(
 ): Paragraph {
   const lines = group.flatMap((entry) => entry.lines);
   const itemOf = group.flatMap((entry) => entry.lines.map(() => entry.item));
-  const joined = joinLines(lines.map((line) => line.text));
+  const joined = joinLines(lines);
+  const base = dominantStyle(joined.segments);
+  const styles: RunStyle[] = [];
+  const runs = settleSpaces(joined.segments, base).map(({ text, style }) => {
+    let index = styles.findIndex((known) => styleKey(known) === styleKey(style));
+    if (index < 0) index = styles.push(style) - 1;
+    return { text, style: index };
+  });
+  const baseStyle = styles.findIndex((style) => styleKey(style) === styleKey(base));
   const first = lines[0];
   const x = Math.min(...lines.map((line) => line.left));
   const right = Math.max(...lines.map((line) => line.right));
-  const fontSize = median(lines.map((line) => line.fontSize));
+  const { fontSize } = base;
   const steps = lines.slice(1).map((line, index) => line.baseline - lines[index].baseline);
 
   // A paragraph of full lines is as wide as its lines. A single line says
@@ -242,15 +357,18 @@ function paragraphFrom(
     itemIds: group.map((entry) => entry.item.id),
     splittable,
     text: joined.text,
+    runs,
+    styles,
+    baseStyle,
     lineCount: lines.length,
     firstBaseline: first.baseline,
     lineHeight: steps.length > 0 ? median(steps) : fontSize * 1.2,
     inset: x - column.x,
     width: reach - x,
     indent: first.left - x,
-    fontName: mostCommon(lines.map((line) => line.fontName)),
+    fontName: base.fontName,
     fontSize,
-    color: mostCommon(lines.map((line) => line.color)),
+    color: base.color,
     align: justified ? "justify" : "left",
     lines: lines.map((line, index) => {
       const item = itemOf[index];
@@ -270,28 +388,28 @@ function paragraphFrom(
 /** Lines back into running text, and where each line went in it. A hyphen at
  *  a line's end that the next line continues in lower case was put there by
  *  the typesetter, not the author. */
-function joinLines(lines: string[]): {
+function joinLines(lines: Line[]): {
   text: string;
   spans: Array<{ start: number; kept: number }>;
+  segments: Segment[];
 } {
   let text = "";
   const spans: Array<{ start: number; kept: number }> = [];
+  const segments: Segment[] = [];
   for (const line of lines) {
     const previous = spans[spans.length - 1];
-    if (previous && /\p{L}-$/u.test(text) && /^\p{Ll}/u.test(line)) {
+    if (previous && /\p{L}-$/u.test(text) && /^\p{Ll}/u.test(line.text)) {
       text = text.slice(0, -1);
       previous.kept -= 1;
+      dropLastCharacter(segments);
     } else if (text) {
       text += " ";
+      // The space belongs to the line it ends, in whatever that line ended in.
+      segments[segments.length - 1].text += " ";
     }
-    spans.push({ start: text.length, kept: line.length });
-    text += line;
+    spans.push({ start: text.length, kept: line.text.length });
+    text += line.text;
+    for (const segment of line.segments) appendSegment(segments, segment.text, segment.style);
   }
-  return { text, spans };
-}
-
-function mostCommon(values: string[]): string {
-  const counts = new Map<string, number>();
-  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
-  return [...counts.entries()].reduce((best, entry) => (entry[1] > best[1] ? entry : best))[0];
+  return { text, spans, segments };
 }

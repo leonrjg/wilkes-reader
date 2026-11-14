@@ -1,5 +1,5 @@
 import type { FlowColumn, FlowItem, PageFlow } from "./flow.js";
-import type { Paragraph } from "./paragraphs.js";
+import type { Paragraph, StyledRun } from "./paragraphs.js";
 import type { PagePlan } from "./reflow.js";
 
 /**
@@ -15,8 +15,8 @@ import type { PagePlan } from "./reflow.js";
 export interface ParagraphEdit {
   id: string;
   paragraph: Paragraph;
-  /** What the paragraph says now. */
-  text: string;
+  /** What the paragraph says now, in the styles of `paragraph.styles`. */
+  runs: StyledRun[];
   /** How many lines that wraps to, as the browser last laid it out. */
   lineCount: number;
   /** A line box's top to its baseline, as the browser sets this type. Null
@@ -25,7 +25,7 @@ export interface ParagraphEdit {
 }
 
 export function createEdit(id: string, paragraph: Paragraph): ParagraphEdit {
-  return { id, paragraph, text: paragraph.text, lineCount: paragraph.lineCount, ascent: null };
+  return { id, paragraph, runs: paragraph.runs, lineCount: paragraph.lineCount, ascent: null };
 }
 
 /** A line box's top to its baseline for a paragraph's type, as a typical font

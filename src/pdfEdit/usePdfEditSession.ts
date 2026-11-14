@@ -61,15 +61,16 @@ export interface PdfEditSession {
   editOf: (paragraph: Paragraph) => ParagraphEdit | null;
   locate: (itemId: string) => Located | null;
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
-  fontOf: (paragraph: Paragraph) => FontInfo;
+  /** What is known of a font used on a page, by the name pdf.js loaded it as. */
+  fontOf: (page: number, fontName: string) => FontInfo;
   beginEdit: (paragraph: Paragraph, handoff: Omit<Handoff, "editId">) => void;
-  updateEdit: (id: string, patch: Partial<Pick<ParagraphEdit, "text" | "lineCount" | "ascent">>) => void;
+  updateEdit: (id: string, patch: Partial<Pick<ParagraphEdit, "runs" | "lineCount" | "ascent">>) => void;
   removeEdit: (id: string) => void;
   handoff: Handoff | null;
   clearHandoff: () => void;
 }
 
-const DEFAULT_FONT: FontInfo = { fallback: "serif", bold: false, italic: false };
+const DEFAULT_FONT: FontInfo = { name: "", fallback: "serif", bold: false, italic: false };
 
 /** What names a paragraph across re-analysis: the first item it occupies. */
 export const paragraphKey = (paragraph: Paragraph) => paragraph.itemIds[0];
@@ -250,8 +251,7 @@ export function usePdfEditSession(
       locate,
 
       fragmentsOf: (edit) => editFragments(edit, reflow.plans),
-      fontOf: (paragraph) =>
-        analyses.get(paragraph.page)?.fonts.get(paragraph.fontName) ?? DEFAULT_FONT,
+      fontOf: (page, fontName) => analyses.get(page)?.fonts.get(fontName) ?? DEFAULT_FONT,
 
       beginEdit,
       updateEdit,

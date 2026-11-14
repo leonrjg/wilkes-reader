@@ -50,24 +50,30 @@ export function selectText(root: Node, anchor: number, focus: number): void {
 }
 
 /** The line boxes of an element's text, top to bottom. Several client rects
- *  on one line -- one per text node, one per justified word -- are one line. */
+ *  on one line -- one per text node, one per justified word, a superscript
+ *  sitting higher than its neighbours -- are one line. */
 export function lineRects(root: Node): DOMRect[] {
   const range = document.createRange();
   range.selectNodeContents(root);
   const lines: DOMRect[] = [];
   for (const rect of range.getClientRects()) {
     if (rect.height === 0) continue;
-    const line = lines.find(
-      (candidate) => Math.abs(candidate.top - rect.top) < Math.min(candidate.height, rect.height) / 2,
-    );
+    const line = lines.find((candidate) => {
+      const overlap = Math.min(candidate.bottom, rect.bottom) - Math.max(candidate.top, rect.top);
+      return overlap > Math.min(candidate.height, rect.height) / 2;
+    });
     if (!line) {
       lines.push(DOMRect.fromRect(rect));
       continue;
     }
     const left = Math.min(line.left, rect.left);
     const right = Math.max(line.right, rect.right);
+    const top = Math.min(line.top, rect.top);
+    const bottom = Math.max(line.bottom, rect.bottom);
     line.x = left;
+    line.y = top;
     line.width = right - left;
+    line.height = bottom - top;
   }
   return lines.sort((a, b) => a.top - b.top);
 }

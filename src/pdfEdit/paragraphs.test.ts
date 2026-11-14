@@ -74,6 +74,26 @@ describe("paragraphsOf", () => {
     expect(paragraphs[3].inset).toBe(12);
   });
 
+  it("keeps the runs of type a paragraph is set in", () => {
+    const first = line(0, 40, "Plain words, then");
+    const second = line(1, 52, "more plain words.", LEFT, 150);
+    // An italic phrase at the end of the first line and a raised citation
+    // after the second: different faces, and one off the baseline.
+    const italic: TextRun = { text: "a phrase", x: 150, width: 100, baseline: 47, fontSize: 10, fontName: "f2", color: "black" };
+    const raised: TextRun = { text: "7", x: 151, width: 4, baseline: 55, fontSize: 7, fontName: "f1", color: "black" };
+    first.run.width = 95;
+    const [paragraph] = paragraphsOf(flowOf([first, second]), [first.run, italic, second.run, raised]);
+
+    expect(paragraph.text).toBe("Plain words, then a phrase more plain words.7");
+    expect(paragraph.runs.map((run) => [run.text, paragraph.styles[run.style]])).toEqual([
+      ["Plain words, then ", { fontName: "f1", fontSize: 10, color: "black", rise: 0 }],
+      ["a phrase", { fontName: "f2", fontSize: 10, color: "black", rise: 0 }],
+      [" more plain words.", { fontName: "f1", fontSize: 10, color: "black", rise: 0 }],
+      ["7", { fontName: "f1", fontSize: 7, color: "black", rise: 4 }],
+    ]);
+    expect(paragraph.styles[paragraph.baseStyle].fontName).toBe("f1");
+  });
+
   it("offers nothing for a strip with no text on it", () => {
     const lines = [line(0, 40, "Some text above a figure.")];
     const figure = line(1, 60, "");

@@ -16,10 +16,18 @@ export const lineHeightPx = (paragraph: Paragraph, scale: number) =>
  *  so a caret sits in the same place in both. */
 export function paragraphTextStyle(paragraph: Paragraph, font: FontInfo, scale: number): CSSProperties {
   return {
-    fontFamily: `"${paragraph.fontName}", ${font.fallback}`,
+    ...fontFace(paragraph.fontName, font),
     fontSize: paragraph.fontSize * scale,
+    lineHeight: `${lineHeightPx(paragraph, scale)}px`,
+  };
+}
+
+/** A font of the page, as CSS: the embedded face pdf.js registered, then the
+ *  generic family for whatever characters a subset does not have. */
+export function fontFace(fontName: string, font: FontInfo) {
+  return {
+    fontFamily: `"${fontName}", ${font.fallback}`,
     fontWeight: font.bold ? "bold" : "normal",
     fontStyle: font.italic ? "italic" : "normal",
-    lineHeight: `${lineHeightPx(paragraph, scale)}px`,
   };
 }

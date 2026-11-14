@@ -55,6 +55,9 @@ function paragraph(flow: PageFlow, from: number, to: number, splittable = true):
     itemIds: items.map((item) => item.id),
     splittable,
     text: "",
+    runs: [],
+    styles: [{ fontName: "f", fontSize: 10, color: "black", rise: 0 }],
+    baseStyle: 0,
     lineCount: items.length,
     // With line boxes as tall as a line and its gap, and an ascent that puts
     // the box's top on the ink's, an unchanged edit occupies what it replaced.

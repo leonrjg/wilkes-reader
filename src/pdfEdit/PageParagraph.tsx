@@ -77,7 +77,7 @@ export default function PageParagraph({ session, paragraph, geometryOf }: PagePa
     };
   }, [paragraph, beginEdit]);
 
-  const font = session.fontOf(paragraph);
+  const font = session.fontOf(paragraph.page, paragraph.fontName);
   const ascent = estimatedAscent(paragraph);
   const lines = paragraph.lines.map((line, index) => {
     const at = session.locate(line.itemId);

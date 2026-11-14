@@ -4,6 +4,7 @@ import { lineRects, selectText } from "./editableText.js";
 import type { EditFragment, ParagraphEdit } from "./edits.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
 import { lineHeightPx, paragraphTextStyle } from "./paragraphStyle.js";
+import { readRuns, textOfRuns, writeRuns } from "./styledText.js";
 import type { Handoff, PdfEditSession } from "./usePdfEditSession.js";
 
 /**
@@ -59,7 +60,7 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
   const shown = lastBoxes.current;
 
   const textStyle = {
-    ...paragraphTextStyle(paragraph, session.fontOf(paragraph), scale),
+    ...paragraphTextStyle(paragraph, session.fontOf(paragraph.page, paragraph.fontName), scale),
     color: paragraph.color,
   };
 
@@ -82,9 +83,11 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
   useLayoutEffect(() => {
     const text = textRef.current;
     if (!text) return;
-    text.textContent = edit.text;
-    return () => updateEdit(edit.id, { text: text.innerText });
-    // `edit.text` is deliberately not a dependency: it is written once, at mount.
+    writeRuns(text, edit.runs, paragraph, (fontName) => session.fontOf(paragraph.page, fontName));
+    return () => updateEdit(edit.id, { runs: readRuns(text, paragraph) });
+    // Written once, at mount: neither the runs nor the session they came from
+    // is a dependency, or every keystroke elsewhere would rewrite this text.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edit.id, updateEdit]);
 
   // Taken over from the page mid-keystroke: put the caret back where it was
@@ -147,11 +150,11 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
         }}
         onInput={measure}
         onBlur={(event) => {
-          const text = event.currentTarget.innerText;
+          const runs = readRuns(event.currentTarget, paragraph);
           // Back to what the page says: give the paragraph back to the page,
           // which sets it better than this can.
-          if (text === paragraph.text) removeEdit(edit.id);
-          else updateEdit(edit.id, { text });
+          if (textOfRuns(runs) === paragraph.text) removeEdit(edit.id);
+          else updateEdit(edit.id, { runs });
         }}
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
