@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import type { LiveFont } from "./hostFonts.js";
 import type { Paragraph } from "./paragraphs.js";
 import type { FontInfo } from "./pdfPageSource.js";
 
@@ -11,23 +12,39 @@ export const snapPx = (pixels: number) => Math.round(pixels * 64) / 64;
 export const lineHeightPx = (paragraph: Paragraph, scale: number) =>
   snapPx(paragraph.lineHeight * scale);
 
-/** The type a paragraph is set in, as the page has it. Shared by the text laid
- *  invisibly over an untouched paragraph and the live text of an edited one,
- *  so a caret sits in the same place in both. */
-export function paragraphTextStyle(paragraph: Paragraph, font: FontInfo, scale: number): CSSProperties {
+/** A font, as the CSS that asks for it. */
+export interface FaceStyle {
+  fontFamily: string;
+  fontWeight: "bold" | "normal";
+  fontStyle: "italic" | "normal";
+}
+
+/** The size and leading of a paragraph's type, in a given face. */
+export function paragraphTextStyle(paragraph: Paragraph, face: FaceStyle, scale: number): CSSProperties {
   return {
-    ...fontFace(paragraph.fontName, font),
+    ...face,
     fontSize: paragraph.fontSize * scale,
     lineHeight: `${lineHeightPx(paragraph, scale)}px`,
   };
 }
 
-/** A font of the page, as CSS: the embedded face pdf.js registered, then the
- *  generic family for whatever characters a subset does not have. */
-export function fontFace(fontName: string, font: FontInfo) {
+/** A font as the page draws it: the embedded face pdf.js registered. It is the
+ *  face the page's own glyphs are in, so a caret laid over the page in it
+ *  falls between the letters it appears to be between. A subset lacks glyphs;
+ *  the generic family covers what it lacks. */
+export function pageFace(fontName: string, font: FontInfo): FaceStyle {
   return {
-    fontFamily: `"${fontName}", ${font.fallback}`,
+    fontFamily: `"${fontName}", ${font.generic}`,
     fontWeight: font.bold ? "bold" : "normal",
     fontStyle: font.italic ? "italic" : "normal",
   };
+}
+
+/** The font edited text is set in: the whole font the host resolved, which is
+ *  the file it will also save with. It is already the bold or the italic, so
+ *  nothing is asked of the browser on top. Until the host has answered -- or
+ *  when there is no host to ask -- it is the page's face. */
+export function liveFace(fontName: string, font: FontInfo, live: LiveFont | null): FaceStyle {
+  if (!live) return pageFace(fontName, font);
+  return { fontFamily: `"${live.family}", ${font.generic}`, fontWeight: "normal", fontStyle: "normal" };
 }

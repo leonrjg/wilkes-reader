@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
+import type { ResolvePdfFont } from "./pdfEdit/hostFonts.js";
 import type { ReaderPositionStore } from "./readerPositions.js";
 
 /** The appearance a reader renders in. The host resolves whatever theme setting
@@ -45,6 +46,16 @@ export interface ReaderHostServices {
    *  against the document, and a host that wants it fenced to a corpus fences
    *  it here. */
   resolveLocalAsset?: (path: string) => string | null;
+  /** A whole, installed font to set edited PDF text in, standing in for a font
+   *  the document names.
+   *
+   *  A PDF embeds subsets of its fonts -- the glyphs it needed and no others --
+   *  so text a reader types cannot be set in them. The host finds a whole one,
+   *  and saves the edited document with the same file: that it is the same
+   *  file on both sides is what makes the saved line breaks the ones on
+   *  screen. Optional: without it, edited text is set in the document's
+   *  embedded faces as far as they go, and cannot be exported. */
+  resolvePdfFont?: ResolvePdfFont;
 }
 
 const ReaderHostContext = createContext<ReaderHostServices | null>(null);

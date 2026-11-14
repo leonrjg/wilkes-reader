@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { PARAGRAPH_HOST } from "./caretTravel.js";
 import { lineRects, selectText } from "./editableText.js";
-import type { EditFragment, ParagraphEdit } from "./edits.js";
+import { estimatedAscent, type EditFragment, type ParagraphEdit } from "./edits.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
-import { lineHeightPx, paragraphTextStyle } from "./paragraphStyle.js";
-import { readRuns, textOfRuns, writeRuns } from "./styledText.js";
+import { lineHeightPx, liveFace, paragraphTextStyle } from "./paragraphStyle.js";
+import { readRuns, restyleRuns, styleIndexOf, textOfRuns, writeRuns } from "./styledText.js";
+import { typesetText } from "./typeset.js";
 import type { Handoff, PdfEditSession } from "./usePdfEditSession.js";
 
 /**
@@ -59,10 +60,15 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
   if (boxes.length > 0) lastBoxes.current = boxes;
   const shown = lastBoxes.current;
 
+  const liveFontOf = (fontName: string) => session.liveFontOf(paragraph.page, fontName);
+  const faceOf = (fontName: string) =>
+    liveFace(fontName, session.fontOf(paragraph.page, fontName), liveFontOf(fontName));
   const textStyle = {
-    ...paragraphTextStyle(paragraph, session.fontOf(paragraph.page, paragraph.fontName), scale),
+    ...paragraphTextStyle(paragraph, faceOf(paragraph.fontName), scale),
     color: paragraph.color,
   };
+  // Which whole fonts have arrived: a string, so an effect can depend on it.
+  const facesReady = paragraph.styles.map((style) => liveFontOf(style.fontName)?.family ?? "").join("|");
 
   /** Report what the browser made of the text: how many lines, and where in a
    *  line box this type's baseline sits. */
@@ -83,7 +89,7 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
   useLayoutEffect(() => {
     const text = textRef.current;
     if (!text) return;
-    writeRuns(text, edit.runs, paragraph, (fontName) => session.fontOf(paragraph.page, fontName));
+    writeRuns(text, edit.runs, paragraph, faceOf);
     return () => updateEdit(edit.id, { runs: readRuns(text, paragraph) });
     // Written once, at mount: neither the runs nor the session they came from
     // is a dependency, or every keystroke elsewhere would rewrite this text.
@@ -99,9 +105,41 @@ export default function LiveParagraph({ session, edit, geometryOf }: LiveParagra
     clearHandoff();
   }, [handoff, edit.id, clearHandoff]);
 
+  // A whole font arriving from the host replaces the page's face in every span
+  // that was written before it came.
+  useLayoutEffect(() => {
+    if (textRef.current) restyleRuns(textRef.current, paragraph, faceOf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `facesReady` is what `faceOf` depends on
+  }, [facesReady, paragraph]);
+
   // Before paint, so the lines around a paragraph never show at the position
   // its previous height put them.
-  useLayoutEffect(measure, [measure, textWidth, paragraph.fontSize]);
+  useLayoutEffect(measure, [measure, textWidth, paragraph.fontSize, facesReady]);
+
+  // What this paragraph says and where, for whoever saves the document. Read
+  // off the screen when asked, so it is always what is on the screen.
+  const typeset = () => {
+    const text = textRef.current;
+    const layer = text?.closest(".pdf-edit-layer");
+    if (!text || !layer) return [];
+    const origin = layer.getBoundingClientRect().left;
+    return typesetText({
+      text,
+      paragraph,
+      fragments: session.fragmentsOf(edit),
+      ascent: edit.ascent ?? estimatedAscent(paragraph),
+      fontId: (fontName) => liveFontOf(fontName)?.id ?? null,
+      styleOf: (node) => styleIndexOf(text, node, paragraph),
+      toPage: (page, clientX) => (clientX - origin) / (geometryOf(page)?.scale ?? scale),
+    });
+  };
+  const typesetRef = useRef(typeset);
+  typesetRef.current = typeset;
+  const { registerTypesetter } = session;
+  useEffect(
+    () => registerTypesetter(edit.id, () => typesetRef.current()),
+    [registerTypesetter, edit.id],
+  );
 
   // An embedded font registers when its page first renders, which can be after
   // this block mounted in the fallback face.

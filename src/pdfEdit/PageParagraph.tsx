@@ -4,7 +4,7 @@ import { textOffsetOf } from "./editableText.js";
 import { estimatedAscent } from "./edits.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
 import type { Paragraph } from "./paragraphs.js";
-import { lineHeightPx, paragraphTextStyle } from "./paragraphStyle.js";
+import { lineHeightPx, pageFace, paragraphTextStyle } from "./paragraphStyle.js";
 import type { PdfEditSession, PendingInput } from "./usePdfEditSession.js";
 
 /**
@@ -77,7 +77,7 @@ export default function PageParagraph({ session, paragraph, geometryOf }: PagePa
     };
   }, [paragraph, beginEdit]);
 
-  const font = session.fontOf(paragraph.page, paragraph.fontName);
+  const face = pageFace(paragraph.fontName, session.fontOf(paragraph.page, paragraph.fontName));
   const ascent = estimatedAscent(paragraph);
   const lines = paragraph.lines.map((line, index) => {
     const at = session.locate(line.itemId);
@@ -89,7 +89,7 @@ export default function PageParagraph({ session, paragraph, geometryOf }: PagePa
         key={index}
         data-line={index}
         style={{
-          ...paragraphTextStyle(paragraph, font, scale),
+          ...paragraphTextStyle(paragraph, face, scale),
           left: (at.x + line.inset) * scale,
           top: geometry.top + (at.y + line.baselineOffset - ascent) * scale,
           width: line.width * scale,

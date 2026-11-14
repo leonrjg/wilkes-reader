@@ -64,11 +64,24 @@
   outline: none;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+  /* Set as a saved file will set it: each word at the place it has here, and
+     inside a word nothing but the font's own advances. */
+  font-kerning: none;
+  font-variant-ligatures: none;
   /* The embedded face has no bold or italic of its own registered; without
      this the browser would smear one on top of a face that already is one. */
   font-synthesis: none;
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* Every line of a paragraph is the same height, whatever is on it: that is
+   what the reflow counts in, and what a saved file is written to. A run in
+   another face, another size or off the baseline would otherwise make its
+   line as much taller as its own metrics stand proud of the paragraph's. With
+   no height of their own, runs leave the line to the paragraph. */
+.pdf-edit-text span {
+  line-height: 0;
 }
 
 .pdf-edit-probe {

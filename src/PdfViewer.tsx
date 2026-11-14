@@ -50,6 +50,7 @@ import type { FindableReaderHandle, ZoomableReaderHandle } from "./readerHandle.
 import PdfEditPage from "./pdfEdit/PdfEditPage.js";
 import PdfEditLayer, { type PageGeometry } from "./pdfEdit/PdfEditLayer.js";
 import { usePdfEditSession } from "./pdfEdit/usePdfEditSession.js";
+import type { PdfEditExport } from "./pdfEdit/editExport.js";
 
 export interface PdfViewerProps {
   /** The document to read, and what identifies it.
@@ -126,6 +127,11 @@ export interface PdfReaderHandle extends FindableReaderHandle, ZoomableReaderHan
   /** The parsed document, for hosts that need to read it directly. Null until
    *  it has loaded. */
   getDocument: () => PDFDocumentProxy | null;
+  /** The document as edited, for the host to write to a file: for each page
+   *  that changed, which areas of which source pages are drawn where and what
+   *  text is set among them. Null when not editing or nothing has changed.
+   *  Throws when some edited text has no whole font to be saved in. */
+  exportEdits: () => PdfEditExport | null;
 }
 
 const PAGE_GAP_PX = 12;
@@ -309,6 +315,7 @@ export default function PdfViewer({
     colorScheme,
     pdfAutoZoomTargetPx: autoZoomTargetPx,
     positions,
+    resolvePdfFont,
   } = useReaderHost();
   const isDark = colorScheme === "dark";
   const rootRef = useRef<HTMLDivElement>(null);
@@ -389,14 +396,23 @@ export default function PdfViewer({
   const contentWidthRef = useRef(contentWidth);
   const { pageMetrics, hasPageMetrics } = usePdfPageMetrics(pdf, documentKey);
   const outline = usePdfOutline(pdf, suppliedOutline);
-  const editSession = usePdfEditSession(pdf ?? null, pageMetrics, editing && hasPageMetrics);
+  const editSession = usePdfEditSession(
+    pdf ?? null,
+    pageMetrics,
+    editing && hasPageMetrics,
+    resolvePdfFont,
+  );
   // The pages there are to lay out: the document's, and while editing any that
   // content was pushed onto past its end. Those take the last page's size.
+  // Keyed on the count rather than the session: the session is a new object
+  // whenever anything in it changes, and a new list of pages on each of those
+  // would have the virtualizer re-measure for every keystroke.
+  const editPageCount = editSession?.pageCount ?? 0;
   const layoutMetrics = useMemo(() => {
     const last = pageMetrics[pageMetrics.length - 1];
-    const appended = editSession && last ? editSession.pageCount - pageMetrics.length : 0;
+    const appended = last ? editPageCount - pageMetrics.length : 0;
     return appended > 0 ? [...pageMetrics, ...Array<typeof last>(appended).fill(last)] : pageMetrics;
-  }, [pageMetrics, editSession]);
+  }, [pageMetrics, editPageCount]);
 
   // Where the reader is, as a page + two ratios rather than as pixels. This is
   // the position of record: `scrollTop`/`scrollLeft` are recomputed from it
@@ -1018,6 +1034,7 @@ export default function PdfViewer({
       getCurrentPage: () => currentPage,
       getPageCount: () => numPages,
       getDocument: () => pdf ?? null,
+      exportEdits: () => editSession?.exportEdits() ?? null,
       getZoom: () => zoom,
       setZoom: (next) =>
         setZoomKeepingPlace(() =>
@@ -1041,6 +1058,7 @@ export default function PdfViewer({
       zoom,
       setZoomKeepingPlace,
       find,
+      editSession,
     ],
   );
 

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "../pdfjs.js";
 import { blankPageFlow, buildPageFlow, resolveDocumentFrame } from "./documentFrame.js";
+import { buildExport, type PdfEditExport, type TypesetText } from "./editExport.js";
 import { applyEdits, createEdit, editFragments, type EditFragment, type ParagraphEdit } from "./edits.js";
-import type { PageFlow, Placement } from "./flow.js";
+import type { FlowItem, PageFlow, Placement } from "./flow.js";
+import { useLiveFonts, type LiveFont, type ResolvePdfFont } from "./hostFonts.js";
 import { paragraphsOf, type Paragraph } from "./paragraphs.js";
 import { analysePage, PageRasters, type FontInfo, type PageAnalysis } from "./pdfPageSource.js";
 import { layoutPage, reflowDocument } from "./reflow.js";
@@ -63,6 +65,15 @@ export interface PdfEditSession {
   fragmentsOf: (edit: ParagraphEdit) => EditFragment[];
   /** What is known of a font used on a page, by the name pdf.js loaded it as. */
   fontOf: (page: number, fontName: string) => FontInfo;
+  /** The whole font the host resolved that one to, once it has. */
+  liveFontOf: (page: number, fontName: string) => LiveFont | null;
+  /** An edited paragraph offers to say what it shows, for as long as it is
+   *  mounted. Returns the function that withdraws the offer. */
+  registerTypesetter: (editId: string, typeset: () => TypesetText[]) => () => void;
+  /** The document as edited, for a host to write to a file. Null when nothing
+   *  has been changed. Throws when some edited text cannot be saved as it is
+   *  shown -- its font has no whole font behind it. */
+  exportEdits: () => PdfEditExport | null;
   beginEdit: (paragraph: Paragraph, handoff: Omit<Handoff, "editId">) => void;
   updateEdit: (id: string, patch: Partial<Pick<ParagraphEdit, "runs" | "lineCount" | "ascent">>) => void;
   removeEdit: (id: string) => void;
@@ -70,7 +81,7 @@ export interface PdfEditSession {
   clearHandoff: () => void;
 }
 
-const DEFAULT_FONT: FontInfo = { name: "", fallback: "serif", bold: false, italic: false };
+const DEFAULT_FONT: FontInfo = { name: "", generic: "serif", bold: false, italic: false };
 
 /** What names a paragraph across re-analysis: the first item it occupies. */
 export const paragraphKey = (paragraph: Paragraph) => paragraph.itemIds[0];
@@ -79,11 +90,15 @@ export function usePdfEditSession(
   pdf: PDFDocumentProxy | null,
   pageSizes: ReadonlyArray<{ width: number; height: number }>,
   active: boolean,
+  /** The host's way of finding a whole font. Without one, edited text is set
+   *  in the page's embedded faces and cannot be exported. */
+  resolveFont: ResolvePdfFont | undefined,
 ): PdfEditSession | null {
   const [analyses, setAnalyses] = useState<ReadonlyMap<number, PageAnalysis>>(() => new Map());
   const [edits, setEdits] = useState<readonly ParagraphEdit[]>([]);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const requested = useRef(new Set<number>());
+  const typesetters = useRef(new Map<string, () => TypesetText[]>());
   const nextEditId = useRef(1);
   const documentPages = pageSizes.length;
 
@@ -170,7 +185,29 @@ export function usePdfEditSession(
       return placements;
     };
 
-    return { flowOf, paragraphsOn, identityPlacements };
+    /** Whether one item comes directly after another in the column of the page
+     *  they were read from: nothing lies between them there. */
+    const successors = new Map<number, Map<string, string>>();
+    const follows = (previous: FlowItem, next: FlowItem): boolean => {
+      if (previous.content.kind !== "slice" || next.content.kind !== "slice") return false;
+      const page = previous.content.page;
+      let onPage = successors.get(page);
+      if (!onPage) {
+        onPage = new Map();
+        for (const region of flowOf(page)?.regions ?? []) {
+          for (const column of region.columns) {
+            column.items.forEach((item, index) => {
+              const after = column.items[index + 1];
+              if (after) onPage!.set(item.id, after.id);
+            });
+          }
+        }
+        successors.set(page, onPage);
+      }
+      return onPage.get(previous.id) === next.id;
+    };
+
+    return { flowOf, paragraphsOn, identityPlacements, follows };
   }, [analyses, pageSizes, documentPages]);
 
   const reflow = useMemo(
@@ -213,6 +250,23 @@ export function usePdfEditSession(
     setEdits((current) => current.filter((edit) => edit.id !== id));
   }, []);
   const clearHandoff = useCallback(() => setHandoff(null), []);
+  const registerTypesetter = useCallback<PdfEditSession["registerTypesetter"]>((editId, typeset) => {
+    typesetters.current.set(editId, typeset);
+    return () => {
+      if (typesetters.current.get(editId) === typeset) typesetters.current.delete(editId);
+    };
+  }, []);
+
+  // Every font the analysed pages use is resolved ahead of need, so the whole
+  // font is already there when the first keystroke turns a paragraph live.
+  const fontsInUse = useMemo(() => {
+    const unique = new Map<string, FontInfo>();
+    for (const analysis of analyses.values()) {
+      for (const font of analysis.fonts.values()) unique.set(JSON.stringify(font), font);
+    }
+    return [...unique.values()];
+  }, [analyses]);
+  const liveFont = useLiveFonts(resolveFont, fontsInUse);
 
   return useMemo(() => {
     if (!pdf || !rasters) return null;
@@ -252,6 +306,17 @@ export function usePdfEditSession(
 
       fragmentsOf: (edit) => editFragments(edit, reflow.plans),
       fontOf: (page, fontName) => analyses.get(page)?.fonts.get(fontName) ?? DEFAULT_FONT,
+      liveFontOf: (page, fontName) => {
+        const font = analyses.get(page)?.fonts.get(fontName);
+        return font ? liveFont(font) : null;
+      },
+      registerTypesetter,
+
+      exportEdits: () => {
+        if (edits.length === 0) return null;
+        const text = [...typesetters.current.values()].flatMap((typeset) => typeset());
+        return buildExport(reflow.plans, model.flowOf, model.follows, text);
+      },
 
       beginEdit,
       updateEdit,
@@ -271,5 +336,7 @@ export function usePdfEditSession(
     beginEdit,
     updateEdit,
     removeEdit,
+    liveFont,
+    registerTypesetter,
   ]);
 }

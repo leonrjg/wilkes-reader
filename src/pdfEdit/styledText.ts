@@ -1,6 +1,5 @@
 import type { Paragraph, RunStyle, StyledRun } from "./paragraphs.js";
-import { fontFace } from "./paragraphStyle.js";
-import type { FontInfo } from "./pdfPageSource.js";
+import type { FaceStyle } from "./paragraphStyle.js";
 
 /**
  * A paragraph's styled runs, as DOM and back.
@@ -20,13 +19,13 @@ export function writeRuns(
   root: HTMLElement,
   runs: readonly StyledRun[],
   paragraph: Paragraph,
-  fontOf: (fontName: string) => FontInfo,
+  faceOf: (fontName: string) => FaceStyle,
 ): void {
   root.replaceChildren(
     ...runs.map((run) => {
       const span = document.createElement("span");
       span.setAttribute(STYLE_ATTRIBUTE, String(run.style));
-      applyStyle(span, paragraph.styles[run.style], paragraph, fontOf);
+      applyStyle(span, paragraph.styles[run.style], paragraph, faceOf);
       span.textContent = run.text;
       return span;
     }),
@@ -39,22 +38,18 @@ function applyStyle(
   span: HTMLElement,
   style: RunStyle,
   paragraph: Paragraph,
-  fontOf: (fontName: string) => FontInfo,
+  faceOf: (fontName: string) => FaceStyle,
 ): void {
   const base = paragraph.styles[paragraph.baseStyle];
   if (style.fontName !== base.fontName) {
-    const face = fontFace(style.fontName, fontOf(style.fontName));
+    const face = faceOf(style.fontName);
     span.style.fontFamily = face.fontFamily;
     span.style.fontWeight = face.fontWeight;
     span.style.fontStyle = face.fontStyle;
   }
   if (style.fontSize !== base.fontSize) span.style.fontSize = `${style.fontSize / base.fontSize}em`;
   if (style.color !== base.color) span.style.color = style.color;
-  if (style.rise !== 0) {
-    span.style.verticalAlign = `${style.rise / style.fontSize}em`;
-    // A raised box would otherwise push its line taller than the others.
-    span.style.lineHeight = "0";
-  }
+  if (style.rise !== 0) span.style.verticalAlign = `${style.rise / style.fontSize}em`;
 }
 
 /** The text as it is now, in runs. Text the browser left outside any span --
@@ -65,14 +60,32 @@ export function readRuns(root: HTMLElement, paragraph: Paragraph): StyledRun[] {
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node.nodeValue ?? "";
     if (text === "") continue;
-    const marked = node.parentElement?.closest(`[${STYLE_ATTRIBUTE}]`);
-    const index = marked && root.contains(marked) ? Number(marked.getAttribute(STYLE_ATTRIBUTE)) : NaN;
-    const style = paragraph.styles[index] ? index : paragraph.baseStyle;
+    const style = styleIndexOf(root, node, paragraph);
     const last = runs[runs.length - 1];
     if (last && last.style === style) last.text += text;
     else runs.push({ text, style });
   }
   return runs;
+}
+
+/** The style a text node of `root` is in. */
+export function styleIndexOf(root: HTMLElement, node: Node, paragraph: Paragraph): number {
+  const marked = node.parentElement?.closest(`[${STYLE_ATTRIBUTE}]`);
+  const index = marked && root.contains(marked) ? Number(marked.getAttribute(STYLE_ATTRIBUTE)) : NaN;
+  return paragraph.styles[index] ? index : paragraph.baseStyle;
+}
+
+/** Give the spans of a font its face again: a whole font from the host can
+ *  arrive after the text was written in the page's. */
+export function restyleRuns(
+  root: HTMLElement,
+  paragraph: Paragraph,
+  faceOf: (fontName: string) => FaceStyle,
+): void {
+  for (const span of root.querySelectorAll<HTMLElement>(`[${STYLE_ATTRIBUTE}]`)) {
+    const style = paragraph.styles[Number(span.getAttribute(STYLE_ATTRIBUTE))];
+    if (style) applyStyle(span, style, paragraph, faceOf);
+  }
 }
 
 export const textOfRuns = (runs: readonly StyledRun[]) => runs.map((run) => run.text).join("");
