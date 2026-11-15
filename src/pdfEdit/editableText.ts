@@ -92,17 +92,27 @@ export function lineRects(root: Node): DOMRect[] {
     line.width = right - left;
     line.height = bottom - top;
   }
+  // An element with no text -- a paragraph Enter has just made, or one
+  // emptied -- is still one line: the one a caret put in it stands on.
+  if (lines.length === 0 && root instanceof Element && textLength(root) === 0) {
+    const box = root.getBoundingClientRect();
+    if (box.height > 0) lines.push(box);
+  }
   return lines;
 }
 
-/** Where the caret is on screen, or null when the selection is a range or the
- *  browser will not say (it reports nothing for a caret in an empty line). */
-export function caretRect(): DOMRect | null {
+/** Where the caret in `host` is on screen, or null when the selection is a
+ *  range or the browser will not say. It reports nothing for a caret in an
+ *  empty line, so in a host with no text the caret is taken to be where the
+ *  browser draws it: at the start of the host's one line. */
+export function caretRect(host: Node): DOMRect | null {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return null;
   const range = selection.getRangeAt(0);
   const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
-  return rect.height > 0 ? rect : null;
+  if (rect.height > 0) return rect;
+  const [line] = textLength(host) === 0 ? lineRects(host) : [];
+  return line ? new DOMRect(line.left, line.top, 0, line.height) : null;
 }
 
 /** Put the caret at the text position nearest a point, if that is in `root`. */

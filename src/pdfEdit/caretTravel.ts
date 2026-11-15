@@ -174,7 +174,7 @@ export function travelOnArrow(event: KeyboardEvent, layer: HTMLElement | null): 
     destination = hosts[index + 1];
     edge = "start";
   } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-    const caret = caretRect();
+    const caret = caretRect(host);
     const lines = lineRects(host);
     if (!caret || lines.length === 0) return;
     const middle = (caret.top + caret.bottom) / 2;
@@ -216,7 +216,7 @@ function enter(host: HTMLElement, edge: Edge, column: number | null): void {
  *  a paragraph can be taller than the viewport, or sized to nothing with its
  *  lines placed absolutely. */
 function revealCaret(host: HTMLElement): void {
-  const caret = caretRect();
+  const caret = caretRect(host);
   const scroller = scrollParent(host);
   if (!caret || !scroller) return;
   const bounds = scroller.getBoundingClientRect();

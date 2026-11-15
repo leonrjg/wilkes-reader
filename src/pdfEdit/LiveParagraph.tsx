@@ -261,6 +261,11 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
           ...textStyle,
           textAlign: paragraph.align,
           textIndent: paragraph.indent * scale,
+          // Never less than a line. With nothing in it -- just made by Enter,
+          // or emptied -- it would have no height, and an element with no
+          // line has no place for the caret: WebKit moves it on into the next
+          // paragraph's text, and what is typed goes there.
+          minHeight: lineHeight,
         }}
         {...{ [PARAGRAPH_HOST]: "" }}
       />
