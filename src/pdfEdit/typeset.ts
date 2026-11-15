@@ -65,10 +65,12 @@ export function typesetText(input: TypesetInput): TypesetText[] {
       const end = start + word[0].length;
       // A word too long for its line is broken across two; each piece is then
       // its own run. One character at a time finds the break without guessing.
+      // So is a word set with character spacing: a saved file sets a run in
+      // its font's own advances, so each character is put where it is here.
       range.setStart(node, start);
       range.setEnd(node, end);
       const pieces: Array<[number, number]> =
-        inked(range.getClientRects()).length > 1
+        inked(range.getClientRects()).length > 1 || style.spacing
           ? characterSpans(value, start, end)
           : [[start, end]];
       for (const [pieceStart, pieceEnd] of pieces) {

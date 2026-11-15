@@ -53,8 +53,9 @@ const TEXT_OPERATIONS: ReadonlySet<number> = new Set([
  *  optimised list, whose places are not the ones a render's filter is asked
  *  about -- a page set one glyph at a time has its text operations merged in
  *  one list and not in the other. */
-interface WalkedOperations {
+export interface WalkedOperations {
   fnArray: number[];
+  argsArray: unknown[];
 }
 
 function operationsOf(task: unknown): WalkedOperations {
@@ -71,7 +72,7 @@ async function renderPage(
   pixelsPerUnit: number,
   readBack: boolean,
   layer: RasterLayer = "page",
-): Promise<{ canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }> {
+): Promise<{ canvas: HTMLCanvasElement; context: CanvasRenderingContext2D; operations: WalkedOperations }> {
   const viewport = page.getViewport({ scale: pixelsPerUnit });
   const canvas = document.createElement("canvas");
   canvas.width = Math.floor(viewport.width);
@@ -99,17 +100,28 @@ async function renderPage(
       : {}),
   });
   await task.promise;
-  return { canvas, context };
+  return { canvas, context, operations: operationsOf(task) };
 }
 
-export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageAnalysis> {
-  const page = await pdf.getPage(pageNumber);
-  const { canvas, context } = await renderPage(page, ANALYSIS_SCALE, true);
+async function imageOf(
+  page: PDFPageProxy,
+  layer: RasterLayer,
+): Promise<{ image: ImageData; operations: WalkedOperations }> {
+  const { canvas, context, operations } = await renderPage(page, ANALYSIS_SCALE, true, layer);
   const image = context.getImageData(0, 0, canvas.width, canvas.height);
   // Release the surface now rather than at collection: these are megabytes.
   canvas.width = 0;
   canvas.height = 0;
+  return { image, operations };
+}
+
+export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Promise<PageAnalysis> {
+  const page = await pdf.getPage(pageNumber);
+  const { image, operations } = await imageOf(page, "page");
+  // The same page without its text: where the two differ is the text's ink.
+  const { image: paper } = await imageOf(page, "paper");
   const layout = layoutFromInk(inkGridFromImage(image, ANALYSIS_SCALE));
+  const spacingOf = characterSpacing(operations);
 
   installReadableStreamAsyncIterator();
   const content = await page.getTextContent();
@@ -140,7 +152,8 @@ export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Pr
       baseline: transform[5],
       fontSize,
       fontName,
-      color: inkColour(image, {
+      spacing: spacingOf(item.str),
+      color: inkColour(image, paper, {
         x: transform[4] * ANALYSIS_SCALE,
         y: (transform[5] - fontSize * 0.75) * ANALYSIS_SCALE,
         width: item.width * ANALYSIS_SCALE,
@@ -148,34 +161,162 @@ export async function analysePage(pdf: PDFDocumentProxy, pageNumber: number): Pr
       }),
     });
   }
+  if (spacingOf.unread > 0) {
+    console.warn(
+      `PDF edit: page ${pageNumber} has ${spacingOf.unread} piece(s) of text not found among the glyphs it draws; they are set without character spacing`,
+    );
+  }
   return { layout, runs, fonts, faces };
 }
 
-/** The colour a run is set in: the darkest thing drawn where it sits. Read
- *  from the raster because the text layer does not carry fill colours. */
-function inkColour(
-  image: ImageData,
+/** A glyph in the operations, as far as it is read here. */
+interface DrawnGlyph {
+  unicode?: string;
+}
+
+/** Text as it is matched between the operations and the text layer: without
+ *  its spaces, which the text layer adds and drops as gaps suggest, and with
+ *  ligatures and the like taken apart, as the text layer gives them. */
+const comparable = (text: string) => text.normalize("NFKC").replace(/\s+/g, "");
+
+/**
+ * The character spacing each piece of a page's text is set with, in ems of
+ * its font: what is added after every glyph -- `Tc`, times the horizontal
+ * scaling, over the font size. A headline is often set tighter than its
+ * font's own advances, and set again without that it would be wider than the
+ * page has it, and break its lines elsewhere.
+ *
+ * The text layer does not say; the operations the page was drawn with do,
+ * glyph by glyph. Each piece of the text layer, asked for in the order the
+ * text layer gives them, is found among the glyphs by what it says, from
+ * where the piece before it was found. One that is not there -- text a
+ * document gives in place of what it draws, or set right to left -- is set
+ * with none, and is counted in `unread`.
+ */
+export function characterSpacing(operations: WalkedOperations): ((text: string) => number) & { unread: number } {
+  let drawn = "";
+  const spacingAt: number[] = [];
+  let state = { charSpacing: 0, scaling: 1, size: 1 };
+  const saved: Array<typeof state> = [];
+  const { fnArray, argsArray } = operations;
+  for (let index = 0; index < fnArray.length; index++) {
+    const args = (argsArray[index] ?? []) as unknown[];
+    let glyphs: unknown = null;
+    switch (fnArray[index]) {
+      case OPS.save:
+        saved.push({ ...state });
+        break;
+      case OPS.restore:
+        state = saved.pop() ?? state;
+        break;
+      case OPS.setCharSpacing:
+        state.charSpacing = Number(args[0]);
+        break;
+      case OPS.setHScale:
+        state.scaling = Number(args[0]) / 100;
+        break;
+      case OPS.setFont:
+        state.size = Number(args[1]);
+        break;
+      case OPS.nextLineSetSpacingShowText:
+        state.charSpacing = Number(args[1]);
+        glyphs = args[2];
+        break;
+      case OPS.showText:
+      case OPS.showSpacedText:
+      case OPS.nextLineShowText:
+        glyphs = args[0];
+        break;
+    }
+    if (!Array.isArray(glyphs)) continue;
+    const spacing = state.size === 0 ? 0 : (state.charSpacing * state.scaling) / state.size;
+    for (const glyph of glyphs) {
+      // The rest are numbers: a nudge between two glyphs, not a glyph.
+      const text = typeof glyph === "object" && glyph !== null ? (glyph as DrawnGlyph).unicode : undefined;
+      if (!text) continue;
+      const kept = comparable(text);
+      drawn += kept;
+      for (let unit = 0; unit < kept.length; unit++) spacingAt.push(spacing);
+    }
+  }
+
+  let from = 0;
+  const spacingOf = Object.assign(
+    (text: string): number => {
+      const wanted = comparable(text);
+      // A space alone is set with what was set before it.
+      if (wanted === "") return spacingAt[from - 1] ?? 0;
+      const at = drawn.indexOf(wanted, from);
+      if (at < 0) {
+        spacingOf.unread++;
+        return 0;
+      }
+      from = at + wanted.length;
+      return spacingAt[at];
+    },
+    { unread: 0 },
+  );
+  return spacingOf;
+}
+
+/** A raster's pixels, row by row, four bytes to a pixel. */
+interface Pixels {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+
+/** How far apart, summed over the channels, the page and its paper may be and
+ *  the text still have drawn nothing there. */
+const NO_INK = 8;
+
+/**
+ * The colour a run is set in, read from the rasters because the text layer
+ * does not carry fill colours.
+ *
+ * It is the colour of what the text drew: the page where it differs most from
+ * the page without its text, which is the middle of a stroke, where nothing of
+ * what lies under the text shows through its edges. Not the darkest thing
+ * there, which on a dark ground is the ground: white set on green would be
+ * read as green. Text that drew nothing -- the invisible text an OCR program
+ * lays over a scan -- has no colour of its own, and is given that of the
+ * darkest thing under it: the scanned words it stands for.
+ */
+export function inkColour(
+  page: Pixels,
+  paper: Pixels,
   area: { x: number; y: number; width: number; height: number },
 ): string {
   const left = Math.max(0, Math.floor(area.x));
   const top = Math.max(0, Math.floor(area.y));
-  const right = Math.min(image.width, Math.ceil(area.x + area.width));
-  const bottom = Math.min(image.height, Math.ceil(area.y + area.height));
+  const right = Math.min(page.width, Math.ceil(area.x + area.width));
+  const bottom = Math.min(page.height, Math.ceil(area.y + area.height));
+  const { data } = page;
+  let inked = -1;
+  let difference = NO_INK;
   let darkest = -1;
   let luminance = Infinity;
   for (let y = top; y < bottom; y++) {
     for (let x = left; x < right; x++) {
-      const offset = (y * image.width + x) * 4;
-      const value =
-        image.data[offset] * 0.299 + image.data[offset + 1] * 0.587 + image.data[offset + 2] * 0.114;
+      const offset = (y * page.width + x) * 4;
+      const apart =
+        Math.abs(data[offset] - paper.data[offset]) +
+        Math.abs(data[offset + 1] - paper.data[offset + 1]) +
+        Math.abs(data[offset + 2] - paper.data[offset + 2]);
+      if (apart > difference) {
+        difference = apart;
+        inked = offset;
+      }
+      const value = data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114;
       if (value < luminance) {
         luminance = value;
         darkest = offset;
       }
     }
   }
-  if (darkest < 0) return "black";
-  return `rgb(${image.data[darkest]}, ${image.data[darkest + 1]}, ${image.data[darkest + 2]})`;
+  const at = inked >= 0 ? inked : darkest;
+  if (at < 0) return "black";
+  return `rgb(${data[at]}, ${data[at + 1]}, ${data[at + 2]})`;
 }
 
 /** What pdf.js exposes of a font it loaded. */

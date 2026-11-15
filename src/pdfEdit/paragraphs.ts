@@ -28,6 +28,9 @@ export interface TextRun {
   fontName: string;
   /** The colour the run is drawn in, as CSS. */
   color: string;
+  /** What is added after each of its characters, in ems: the file's
+   *  character spacing. */
+  spacing: number;
 }
 
 /** How a stretch of text is set. */
@@ -43,6 +46,9 @@ export interface RunStyle {
    *  that face of the font's family, rather than what the font itself is. */
   bold?: boolean;
   italic?: boolean;
+  /** What is added after each character, in ems, where the file sets the
+   *  text tighter or looser than its font's own advances. */
+  spacing?: number;
 }
 
 /** A stretch of a paragraph's text in one style, by index into its `styles`. */
@@ -68,7 +74,7 @@ export interface ParagraphLine {
   width: number;
 }
 
-export type TextAlign = "left" | "justify";
+export type TextAlign = "left" | "justify" | "center";
 
 export interface Paragraph {
   page: number;
@@ -243,13 +249,14 @@ function measureEdge(lines: Line[]): number {
   return rights[Math.ceil(rights.length * MEASURE_QUANTILE) - 1];
 }
 
-/** A paragraph of one or two lines does not say how it is aligned: there are
- *  not two full lines to compare. Where the column's longer paragraphs in the
- *  same size are justified, it is taken to be too. */
+/** A paragraph of one or two lines does not say whether it is justified:
+ *  there are not two full lines to compare. Where the column's longer
+ *  paragraphs in the same size are justified, it is taken to be too -- unless
+ *  its lines already showed it centred. */
 function alignedWithColumn(paragraphs: Paragraph[]): Paragraph[] {
   const telling = paragraphs.filter((paragraph) => paragraph.lineCount >= 3);
   return paragraphs.map((paragraph) => {
-    if (paragraph.lineCount >= 3 || paragraph.align === "justify") return paragraph;
+    if (paragraph.lineCount >= 3 || paragraph.align !== "left") return paragraph;
     const alike = telling.filter(
       (other) => Math.abs(other.fontSize - paragraph.fontSize) <= FONT_SIZE_TOLERANCE * other.fontSize,
     );
@@ -399,16 +406,18 @@ function firstWordWidth(inked: TextRun[], em: number): number {
 
 function styleOf(run: TextRun, main: TextRun): RunStyle {
   const rise = main.baseline - run.baseline;
+  const spacing = Math.round(run.spacing * 1000) / 1000;
   return {
     fontName: run.fontName,
     fontSize: Math.round(run.fontSize * 100) / 100,
     color: run.color,
     rise: Math.abs(rise) < RISE_TOLERANCE_EMS * main.fontSize ? 0 : Math.round(rise * 100) / 100,
+    ...(spacing !== 0 ? { spacing } : {}),
   };
 }
 
 export const styleKey = (style: RunStyle) =>
-  `${style.fontName}|${style.fontSize}|${style.color}|${style.rise}|${style.bold ?? ""}|${style.italic ?? ""}`;
+  `${style.fontName}|${style.fontSize}|${style.color}|${style.rise}|${style.bold ?? ""}|${style.italic ?? ""}|${style.spacing ?? ""}`;
 
 function appendSegment(segments: Segment[], text: string, style: RunStyle): void {
   const last = segments[segments.length - 1];
@@ -491,6 +500,11 @@ function paragraphFrom(
   const fullLines = lines.slice(0, -1);
   const justified =
     fullLines.length >= 2 && fullLines.every((line) => right - line.right < 0.5 * fontSize);
+  // Centred, it is as wide as its longest line, about the middle its lines
+  // share: set again from there, each line falls where the page has it.
+  const centre = centredOn(lines, fontSize);
+  const longest = Math.max(...lines.map((line) => line.right - line.left));
+  const box = centre === null ? { x, width: reach - x } : { x: centre - longest / 2, width: longest };
 
   const rects = group.flatMap(({ item }) => (item.content.kind === "slice" ? [item.content.rect] : []));
   const areaTop = Math.min(...rects.map((rect) => rect.y));
@@ -508,13 +522,13 @@ function paragraphFrom(
     firstBaseline: first.baseline,
     lastBaseline: lines[lines.length - 1].baseline,
     lineHeight: steps.length > 0 ? median(steps) : fontSize * 1.2,
-    inset: x - column.x,
-    width: reach - x,
-    indent: first.left - x,
+    inset: box.x - column.x,
+    width: box.width,
+    indent: centre === null ? first.left - x : 0,
     fontName: base.fontName,
     fontSize,
     color: base.color,
-    align: justified ? "justify" : "left",
+    align: centre !== null ? "center" : justified ? "justify" : "left",
     lines: lines.map((line, index) => {
       const item = itemOf[index];
       const itemTop = item.content.kind === "slice" ? item.content.rect.y : line.baseline;
@@ -528,6 +542,20 @@ function paragraphFrom(
       };
     }),
   };
+}
+
+/** The middle of a paragraph's lines, if it is set centred: its lines share
+ *  a middle, and neither a left nor a right edge. One line cannot say. */
+function centredOn(lines: Line[], em: number): number | null {
+  if (lines.length < 2) return null;
+  const middles = lines.map((line) => (line.left + line.right) / 2);
+  const spread = (values: number[]) => Math.max(...values) - Math.min(...values);
+  const tolerance = SAME_EDGE_EMS * em;
+  const centred =
+    spread(middles) <= tolerance &&
+    spread(lines.map((line) => line.left)) > tolerance &&
+    spread(lines.map((line) => line.right)) > tolerance;
+  return centred ? middles.reduce((sum, middle) => sum + middle, 0) / middles.length : null;
 }
 
 /** A paragraph with nothing in it, set like `paragraph` and replacing nothing

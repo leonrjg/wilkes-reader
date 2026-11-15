@@ -53,6 +53,8 @@ function applyStyle(
   if (style.fontSize !== base.fontSize) span.style.fontSize = `${style.fontSize / base.fontSize}em`;
   if (style.color !== base.color) span.style.color = style.color;
   if (style.rise !== 0) span.style.verticalAlign = `${style.rise / style.fontSize}em`;
+  // In ems of the span's own size, as the file gives it.
+  if ((style.spacing ?? 0) !== (base.spacing ?? 0)) span.style.letterSpacing = `${style.spacing ?? 0}em`;
 }
 
 /** The text as it is now, in runs. Text the browser left outside any span --

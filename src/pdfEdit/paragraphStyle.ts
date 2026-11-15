@@ -22,12 +22,14 @@ export interface FaceStyle {
   wordSpacing?: string;
 }
 
-/** The size and leading of a paragraph's type, in a given face. */
+/** The size, leading and spacing of a paragraph's type, in a given face. */
 export function paragraphTextStyle(paragraph: Paragraph, face: FaceStyle, scale: number): CSSProperties {
+  const { spacing } = paragraph.styles[paragraph.baseStyle];
   return {
     ...face,
     fontSize: paragraph.fontSize * scale,
     lineHeight: `${lineHeightPx(paragraph, scale)}px`,
+    ...(spacing ? { letterSpacing: `${spacing}em` } : {}),
   };
 }
 

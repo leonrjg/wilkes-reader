@@ -16,7 +16,7 @@ function line(index: number, top: number, text: string, left = LEFT, right = RIG
     trailing: 0,
     content: { kind: "slice", page: 1, rect: { x: LEFT, y: top, width: RIGHT - LEFT, height: 8 } },
   };
-  const run: TextRun = { text, x: left, width: right - left, baseline: top + 7, fontSize: 10, fontName: "f1", color: "black" };
+  const run: TextRun = { text, x: left, width: right - left, baseline: top + 7, fontSize: 10, fontName: "f1", color: "black", spacing: 0 };
   return { item, run };
 }
 
@@ -95,7 +95,7 @@ describe("paragraphsOf", () => {
     const body = (index: number, text: string) => line(index, 40 + index * 12, text);
     const lines = Array.from({ length: 12 }, (_, index) => body(index, "A full line of the paragraph's own text"));
     // The second line has a word in the margin, on its own baseline.
-    const note: TextRun = { text: "margin", x: 262, width: 30, baseline: lines[1].run.baseline, fontSize: 10, fontName: "f1", color: "black" };
+    const note: TextRun = { text: "margin", x: 262, width: 30, baseline: lines[1].run.baseline, fontSize: 10, fontName: "f1", color: "black", spacing: 0 };
     lines[1].item.content = { kind: "slice", page: 1, rect: { x: LEFT, y: 52, width: 260, height: 8 } };
     const paragraphs = paragraphsOf(flowOf(lines), [...lines.map(({ run }) => run), note]);
     expect(paragraphs.map((paragraph) => paragraph.itemIds.length)).toEqual([12]);
@@ -132,8 +132,8 @@ describe("paragraphsOf", () => {
     const second = line(1, 52, "more plain words.", LEFT, 150);
     // An italic phrase at the end of the first line and a raised citation
     // after the second: different faces, and one off the baseline.
-    const italic: TextRun = { text: "a phrase", x: 150, width: 100, baseline: 47, fontSize: 10, fontName: "f2", color: "black" };
-    const raised: TextRun = { text: "7", x: 151, width: 4, baseline: 55, fontSize: 7, fontName: "f1", color: "black" };
+    const italic: TextRun = { text: "a phrase", x: 150, width: 100, baseline: 47, fontSize: 10, fontName: "f2", color: "black", spacing: 0 };
+    const raised: TextRun = { text: "7", x: 151, width: 4, baseline: 55, fontSize: 7, fontName: "f1", color: "black", spacing: 0 };
     first.run.width = 95;
     const [paragraph] = paragraphsOf(flowOf([first, second]), [first.run, italic, second.run, raised]);
 
@@ -145,6 +145,25 @@ describe("paragraphsOf", () => {
       ["7", { fontName: "f1", fontSize: 7, color: "black", rise: 4 }],
     ]);
     expect(paragraph.styles[paragraph.baseStyle].fontName).toBe("f1");
+  });
+
+  it("keeps the character spacing a run is set with", () => {
+    const tight = line(0, 40, "A headline set tight.", LEFT, 180);
+    tight.run.spacing = -0.05;
+    const [paragraph] = paragraphsOf(flowOf([tight]), [tight.run]);
+    expect(paragraph.styles[paragraph.baseStyle]).toMatchObject({ spacing: -0.05 });
+  });
+
+  it("sets centred lines centred, in a box as wide as the longest about their middle", () => {
+    const lines = [line(0, 40, "Study where you want, what", 60, 240), line(1, 52, "you want, when you want.", 65, 235)];
+    const [paragraph] = paragraphsOf(flowOf(lines), lines.map(({ run }) => run));
+    expect(paragraph).toMatchObject({ align: "center", indent: 0, inset: 10, width: 180 });
+  });
+
+  it("does not take ragged lines that share a left edge for centred ones", () => {
+    const lines = [line(0, 40, "Words set flush left and", LEFT, 240), line(1, 52, "ragged right.", LEFT, 150)];
+    const [paragraph] = paragraphsOf(flowOf(lines), lines.map(({ run }) => run));
+    expect(paragraph.align).toBe("left");
   });
 
   it("withholds a paragraph that has a locked line in it", () => {
