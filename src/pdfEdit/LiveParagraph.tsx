@@ -5,7 +5,7 @@ import { insertPlainText, lineRects, selectText, textOffsetOf } from "./editable
 import { estimatedAscent, type EditFragment, type ParagraphEdit } from "./edits.js";
 import { layoutFragments, type FragmentBox } from "./fragmentFloats.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
-import { lineHeightPx, liveFace, paragraphTextStyle } from "./paragraphStyle.js";
+import { lineHeightPx, liveFace, paragraphTextStyle, wholeLineScale } from "./paragraphStyle.js";
 import type { RunStyle } from "./paragraphs.js";
 import { readRuns, restyleRuns, sameRuns, styleIndexOf, writeRuns } from "./styledText.js";
 import { typesetText } from "./typeset.js";
@@ -46,9 +46,17 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   const { updateEdit, removeEdit, handoff, clearHandoff } = session;
 
   const scale = geometryOf(paragraph.page)?.scale ?? 1;
-  const lineHeight = lineHeightPx(paragraph, scale);
-  const textWidth = paragraph.width * scale + WIDTH_SLACK_PX;
-  const boxes = fragmentBoxes(session.fragmentsOf(edit), geometryOf);
+  // Everything in the block is set at `setAt` and scaled by `zoom` to the
+  // page's size: positions on the screen are divided by it on the way in.
+  const setAt = wholeLineScale(paragraph, scale);
+  const zoom = scale / setAt;
+  const lineHeight = lineHeightPx(paragraph, setAt);
+  const textWidth = paragraph.width * setAt + WIDTH_SLACK_PX;
+  const boxes = fragmentBoxes(session.fragmentsOf(edit), geometryOf).map((box) => ({
+    ...box,
+    left: box.left / zoom,
+    top: box.top / zoom,
+  }));
   // A cascade waiting on a page's analysis has not placed this paragraph yet.
   // The text stays mounted where it last was: unmounting would drop the caret.
   const lastBoxes = useRef<FragmentBox[]>([]);
@@ -58,7 +66,7 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   const liveFontsOf = (style: RunStyle) => session.liveFontsOf(style);
   const faceOf = (style: RunStyle) => liveFace(session.fontOf(style.fontName), liveFontsOf(style));
   const textStyle = {
-    ...paragraphTextStyle(paragraph, faceOf(paragraph.styles[paragraph.baseStyle]), scale),
+    ...paragraphTextStyle(paragraph, faceOf(paragraph.styles[paragraph.baseStyle]), setAt),
     color: paragraph.color,
   };
   // Which fonts have arrived: a string, so an effect can depend on it.
@@ -76,7 +84,8 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   );
 
   /** Report what the browser made of the text: how many lines, and where in a
-   *  line box this type's baseline sits. */
+   *  line box this type's baseline sits. On the screen, so at the page's
+   *  scale. */
   const measure = useCallback(() => {
     const text = textRef.current;
     const probe = probeRef.current;
@@ -230,8 +239,10 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
     <div
       className="pdf-edit-block"
       style={{
-        left: layout.left,
-        top: layout.top,
+        left: layout.left * zoom,
+        top: layout.top * zoom,
+        transform: `scale(${zoom})`,
+        transformOrigin: "0 0",
         visibility: shown.length > 0 ? "visible" : "hidden",
         ...(columned
           ? { width: layout.columns, height: layout.columnHeight, columnCount: layout.columns }
@@ -260,7 +271,7 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
         style={{
           ...textStyle,
           textAlign: paragraph.align,
-          textIndent: paragraph.indent * scale,
+          textIndent: paragraph.indent * setAt,
           // Never less than a line. With nothing in it -- just made by Enter,
           // or emptied -- it would have no height, and an element with no
           // line has no place for the caret: WebKit moves it on into the next

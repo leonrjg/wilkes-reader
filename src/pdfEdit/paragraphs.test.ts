@@ -91,6 +91,56 @@ describe("paragraphsOf", () => {
     expect(paragraphs[0].align).toBe("left");
   });
 
+  it("sets ragged lines to the column's measure, not to their longest line", () => {
+    // The column's measure is the first paragraph's: its lines reach 250.
+    const lines = [
+      line(0, 40, "A paragraph set full out to the right"),
+      line(1, 52, "hand edge of the column, which is"),
+      line(2, 64, "where it is measured to.", LEFT, 150),
+      line(3, 88, "Then one set ragged, its longest", LEFT, 240),
+      line(4, 100, "following line well short of", LEFT, 225),
+      line(5, 112, "uncharacteristically.", LEFT, 150),
+    ];
+    const paragraphs = paragraphsOf(flowOf(lines, [4, 4, 4, 16, 4, 4]), lines.map(({ run }) => run));
+    expect(paragraphs.map((paragraph) => paragraph.itemIds.length)).toEqual([3, 3]);
+    // Live text a little wider than the page's still fits its longest line.
+    expect(paragraphs[1]).toMatchObject({ align: "left", inset: 0, width: 200 });
+  });
+
+  it("sets ragged lines to their column even where one reaches past most of its lines", () => {
+    // Most of the column's lines stop at 235; the column itself runs to 250.
+    const full = Array.from({ length: 9 }, (_, index) => line(index, 40 + index * 12, "A line of the paragraph above", LEFT, 235));
+    const lines = [
+      ...full,
+      line(9, 148, "which ends here.", LEFT, 150),
+      line(10, 172, "Then one set ragged, its longest", LEFT, 240),
+      line(11, 184, "following line well short of", LEFT, 225),
+      line(12, 196, "uncharacteristically.", LEFT, 150),
+    ];
+    const gaps = lines.map((_, index) => (index === 10 ? 16 : 4));
+    const paragraphs = paragraphsOf(flowOf(lines, gaps), lines.map(({ run }) => run));
+    expect(paragraphs.map((paragraph) => paragraph.itemIds.length)).toEqual([10, 3]);
+    expect(paragraphs[1]).toMatchObject({ align: "left", inset: 0, width: 200 });
+  });
+
+  it("sets ragged lines short of where a line's next word would have fitted", () => {
+    const lines = [
+      line(0, 40, "A paragraph set full out to the right", LEFT, 253),
+      line(1, 52, "hand edge of the column, which is", LEFT, 253),
+      line(2, 64, "where it is measured to.", LEFT, 150),
+      line(3, 88, "Then one set ragged, its longest", LEFT, 240),
+      line(4, 100, "it, broken before so short a word", LEFT, 225),
+      line(5, 112, "uncharacteristically.", LEFT, 150),
+    ];
+    const paragraphs = paragraphsOf(flowOf(lines, [4, 4, 4, 16, 4, 4]), lines.map(({ run }) => run));
+    expect(paragraphs.map((paragraph) => paragraph.itemIds.length)).toEqual([3, 3]);
+    // "it," would have fitted at the column's measure: the line is set
+    // narrower than that, and wider than the longest line.
+    const right = paragraphs[1].inset + paragraphs[1].width + LEFT;
+    expect(right).toBeGreaterThan(240);
+    expect(right).toBeLessThan(253);
+  });
+
   it("measures a column by its lines, not by a note set in the margin beside one", () => {
     const body = (index: number, text: string) => line(index, 40 + index * 12, text);
     const lines = Array.from({ length: 12 }, (_, index) => body(index, "A full line of the paragraph's own text"));

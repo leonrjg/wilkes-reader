@@ -494,12 +494,25 @@ function paragraphFrom(
   const { fontSize } = base;
   const steps = lines.slice(1).map((line, index) => line.baseline - lines[index].baseline);
 
-  // A paragraph of full lines is as wide as its lines. A single line says
-  // nothing about how far it may run, so it gets the rest of its column.
-  const reach = lines.length > 1 ? right : Math.max(right, column.x + column.width, columnRight);
   const fullLines = lines.slice(0, -1);
   const justified =
     fullLines.length >= 2 && fullLines.every((line) => right - line.right < 0.5 * fontSize);
+  // A single line says nothing about how far it may run, so it gets the rest
+  // of its column. Justified lines are as wide as the longest of them. Ragged
+  // lines were each broken where the next word would not have fitted in the
+  // column: they get the column, short of where any line's next word would
+  // have fitted. As wide as only its longest line, the one that comes out a
+  // pixel wider live than on the page loses its last word.
+  const columnEdge = Math.max(column.x + column.width, columnRight);
+  const nextWordFits = Math.min(
+    ...fullLines.map((line, index) => line.right + SPACE_EMS * fontSize + lines[index + 1].firstWord),
+  );
+  const reach =
+    lines.length === 1
+      ? Math.max(right, columnEdge)
+      : justified
+        ? right
+        : Math.max(right, Math.min(columnEdge, nextWordFits - SPACE_EMS * fontSize));
   // Centred, it is as wide as its longest line, about the middle its lines
   // share: set again from there, each line falls where the page has it.
   const centre = centredOn(lines, fontSize);

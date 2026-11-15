@@ -12,6 +12,16 @@ export const snapPx = (pixels: number) => Math.round(pixels * 64) / 64;
 export const lineHeightPx = (paragraph: Paragraph, scale: number) =>
   snapPx(paragraph.lineHeight * scale);
 
+/** The scale live text is set at, near the page's: the one at which its lines
+ *  are a whole number of pixels apart. WebKit puts a block's lines a whole
+ *  number of pixels apart whatever line height it is asked for -- lines of
+ *  29.44px stand 29px apart -- so a paragraph set at the page's own scale
+ *  creeps up the page a little more with every line. Set at this one and
+ *  scaled by the rest, its lines fall where the page's do. */
+export function wholeLineScale(paragraph: Paragraph, scale: number): number {
+  return Math.max(1, Math.round(paragraph.lineHeight * scale)) / paragraph.lineHeight;
+}
+
 /** A font, as the CSS that asks for it. */
 export interface FaceStyle {
   fontFamily: string;
