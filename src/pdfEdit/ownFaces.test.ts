@@ -26,6 +26,18 @@ describe("ownFaceOf", () => {
     expect([...face!.covers].sort((a, b) => a - b)).toEqual([0x2c, 0x78]);
   });
 
+  it("gives no glyph to a code pdf.js gave none, though its number is a character the font has", () => {
+    // Prince numbers a subset's characters its own way: here the space is
+    // code 79 and was never drawn, so it has no glyph. The built font also
+    // maps the character "O" (U+004F, 79) to its glyph, for copying text out.
+    const face = ownFaceOf({
+      data: builtFont(new Map([[0xe001, 5], [0x4f, 5]])),
+      toUnicode: { _map: Object.assign([], { 1: "O", 79: " " }) },
+      toFontChar: Object.assign([], { 1: 0xe001 }),
+    });
+    expect([...face!.covers]).toEqual([0x4f]);
+  });
+
   it("takes a code as its own character when the file says every one is", () => {
     const face = ownFaceOf({
       data: builtFont(new Map([[0x41, 3], [0x42, 4]])),

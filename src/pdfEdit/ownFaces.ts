@@ -94,7 +94,14 @@ function buildOwnFace(font: LoadedFontFile): OwnFace | null {
     if (characters.length !== 1) continue;
     const character = characters[0].codePointAt(0)!;
     if (character < 0x20 || (character >= 0x7f && character < 0xa0)) continue;
-    const glyph = glyphs.get(toFontChar?.[code] ?? code);
+    // pdf.js gives each code that has a glyph a character of its own in the
+    // font it built, and lists it in `toFontChar`; a code missing there has
+    // no glyph. Looked up as itself, it would be taken for the character with
+    // its number -- which the built font also maps, for copying text out: a
+    // font that numbers its space 79 and never drew one would type an "O".
+    const fontChar = toFontChar ? toFontChar[code] : code;
+    if (fontChar === undefined) continue;
+    const glyph = glyphs.get(fontChar);
     if (!glyph) continue;
     // pdf.js gives a font codes from a standard encoding that the document
     // never used, and points them at whatever glyph there is -- a TeX font's
