@@ -1,12 +1,20 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { PARAGRAPH_HOST } from "./caretTravel.js";
 import type { RegisterParagraph } from "./editInput.js";
 import { insertPlainText, lineRects, selectText, textOffsetOf } from "./editableText.js";
 import { estimatedAscent, type EditFragment, type ParagraphEdit } from "./edits.js";
 import { layoutFragments, type FragmentBox } from "./fragmentFloats.js";
 import type { PageGeometry } from "./PdfEditLayer.js";
-import { lineHeightPx, liveFace, paragraphTextStyle, wholeLineScale } from "./paragraphStyle.js";
-import type { RunStyle } from "./paragraphs.js";
+import {
+  lineHeightPx,
+  liveFace,
+  measurePageLines,
+  pageWordSpacing,
+  paragraphTextStyle,
+  wholeLineScale,
+  WORD_SPACING_PROPERTY,
+} from "./paragraphStyle.js";
+import type { RunStyle, StyledRun } from "./paragraphs.js";
 import { readRuns, restyleRuns, sameRuns, styleIndexOf, writeRuns } from "./styledText.js";
 import { typesetText } from "./typeset.js";
 import type { Handoff, PdfEditSession } from "./usePdfEditSession.js";
@@ -42,6 +50,7 @@ const REMEMBER_DELAY_MS = 400;
 export default function LiveParagraph({ session, edit, geometryOf, register }: LiveParagraphProps) {
   const textRef = useRef<HTMLDivElement>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
+  const linesProbeRef = useRef<HTMLDivElement>(null);
   const { paragraph } = edit;
   const { updateEdit, removeEdit, handoff, clearHandoff } = session;
 
@@ -73,6 +82,30 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   const facesReady = paragraph.styles
     .map((style) => liveFontsOf(style).map((font) => font.family).join(","))
     .join("|");
+
+  // The word spacing that breaks the text's lines where the page did, measured
+  // in the faces it is set in: again whenever one arrives.
+  const [wordSpacing, setWordSpacing] = useState(0);
+  const space = useCallback(() => {
+    const probe = linesProbeRef.current;
+    if (!probe) return;
+    const widthsOf = (pieces: StyledRun[][]) => {
+      const elements = pieces.map((runs) => {
+        const element = document.createElement("div");
+        writeRuns(element, runs, paragraph, faceOf);
+        return element;
+      });
+      probe.replaceChildren(...elements);
+      const widths = elements.map((element) => element.getBoundingClientRect().width / zoom);
+      probe.replaceChildren();
+      return widths;
+    };
+    const spacing = pageWordSpacing(measurePageLines(paragraph, widthsOf, setAt, textWidth));
+    setWordSpacing((previous) => (Math.abs(previous - spacing) > 0.001 ? spacing : previous));
+    // `facesReady` is what `faceOf` depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paragraph, facesReady, setAt, zoom, textWidth]);
+  useLayoutEffect(space, [space]);
 
   // What the text says now. Read against the paragraph as it is when asked,
   // not as it was when whoever asks was set up: its styles can have grown.
@@ -198,7 +231,7 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
 
   // Before paint, so the lines around a paragraph never show at the position
   // its previous height put them.
-  useLayoutEffect(measure, [measure, textWidth, paragraph.fontSize, facesReady]);
+  useLayoutEffect(measure, [measure, textWidth, paragraph.fontSize, facesReady, wordSpacing]);
 
   // What this paragraph says and where, for whoever saves the document. Read
   // off the screen when asked, so it is always what is on the screen.
@@ -228,9 +261,13 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
   // An embedded font registers when its page first renders, which can be after
   // this block mounted in the fallback face.
   useEffect(() => {
-    document.fonts.addEventListener("loadingdone", measure);
-    return () => document.fonts.removeEventListener("loadingdone", measure);
-  }, [measure]);
+    const settle = () => {
+      space();
+      measure();
+    };
+    document.fonts.addEventListener("loadingdone", settle);
+    return () => document.fonts.removeEventListener("loadingdone", settle);
+  }, [space, measure]);
 
   const layout = layoutFragments(shown, lineHeight, textWidth);
   const columned = layout.columns > 1;
@@ -270,6 +307,7 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
         className="pdf-edit-text"
         style={{
           ...textStyle,
+          ...({ [WORD_SPACING_PROPERTY]: `${wordSpacing}px` } as CSSProperties),
           textAlign: paragraph.align,
           textIndent: paragraph.indent * setAt,
           // Never less than a line. With nothing in it -- just made by Enter,
@@ -285,6 +323,14 @@ export default function LiveParagraph({ session, edit, geometryOf, register }: L
       <div className="pdf-edit-probe" style={textStyle} contentEditable={false} aria-hidden>
         <span ref={probeRef} />
       </div>
+      {/* The page's lines, each unbroken, for `measurePageLines` to measure. */}
+      <div
+        ref={linesProbeRef}
+        className="pdf-edit-probe pdf-edit-lines-probe"
+        style={textStyle}
+        contentEditable={false}
+        aria-hidden
+      />
       </div>
     </div>
   );

@@ -600,6 +600,19 @@ export function adoptRuns(
   });
 }
 
+/** The runs of the text from `start` to `end`. */
+export function runsBetween(runs: readonly StyledRun[], start: number, end: number): StyledRun[] {
+  const between: StyledRun[] = [];
+  let at = 0;
+  for (const run of runs) {
+    const from = Math.max(start, at);
+    const to = Math.min(end, at + run.text.length);
+    if (from < to) between.push({ text: run.text.slice(from - at, to - at), style: run.style });
+    at += run.text.length;
+  }
+  return between;
+}
+
 /** Lines back into running text, and where each line went in it. A hyphen at
  *  a line's end that the next line continues in lower case was put there by
  *  the typesetter, not the author. */

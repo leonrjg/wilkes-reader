@@ -46,6 +46,26 @@ describe("ownFaceOf", () => {
     expect(readCharacterMap(face!.data)).toEqual(new Map([[0x41, 3], [0x42, 4]]));
   });
 
+  it("knows how wide the font's space is from the code it says is one", () => {
+    const face = ownFaceOf({
+      data: builtFont(new Map([[0x41, 3]])),
+      toUnicode: { _map: Object.assign([], { 3: " ", 0x41: "A" }) },
+      widths: Object.assign([], { 3: 250, 0x41: 600 }),
+    });
+    expect(face!.space).toBe(0.25);
+  });
+
+  it("takes no space's width from code 32 where the font says code 32 is something else", () => {
+    // A CID font numbers its glyphs as it likes: LM Roman's 32 is an asterisk
+    // half an em wide, and the font has no space at all.
+    const face = ownFaceOf({
+      data: builtFont(new Map([[0x20, 3], [0x41, 4]])),
+      toUnicode: { _map: Object.assign([], { 0x20: "*", 0x41: "A" }) },
+      widths: Object.assign([], { 0x20: 500, 0x41: 600 }),
+    });
+    expect(face!.space).toBeUndefined();
+  });
+
   it("makes nothing of a font with no file", () => {
     expect(ownFaceOf({ data: null, toUnicode: { firstChar: 0, lastChar: 1 } })).toBeNull();
   });

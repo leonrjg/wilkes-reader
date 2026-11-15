@@ -24,7 +24,9 @@ export interface OwnFace {
   covers: ReadonlySet<number>;
   /** How wide the document sets a space in this font, in ems -- known even
    *  when the subset has no glyph for one, which is common: a space is often
-   *  only a gap. */
+   *  only a gap. Unknown when no code of the font stands for a space: code 32
+   *  is a space only where the font says so -- a CID font's code 32 is
+   *  whatever glyph it numbered 32, an asterisk or a question mark. */
   space?: number;
 }
 
@@ -118,7 +120,7 @@ function buildOwnFace(font: LoadedFontFile): OwnFace | null {
   return {
     data: withTable(data, "cmap", writeCharacterMap(byCharacter)),
     covers: new Set(byCharacter.keys()),
-    space: space ?? widthOf(font, 0x20),
+    space,
   };
 }
 

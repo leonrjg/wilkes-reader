@@ -102,6 +102,17 @@
   font-synthesis: none;
 }
 
+/* Set as the live text is, so a line measures here what it will there. */
+.pdf-edit-lines-probe {
+  white-space: pre;
+  font-kerning: none;
+  font-variant-ligatures: none;
+}
+
+.pdf-edit-lines-probe > div {
+  width: max-content;
+}
+
 /* Zero-size and on the baseline, so its top is the baseline's. */
 .pdf-edit-probe > span {
   display: inline-block;

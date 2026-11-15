@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FlowItem, PageFlow } from "./flow.js";
 import { splitRuns } from "./edits.js";
-import { continuesIn, paragraphsOf, runningOnInto, type TextRun } from "./paragraphs.js";
+import { continuesIn, paragraphsOf, runningOnInto, runsBetween, type TextRun } from "./paragraphs.js";
 
 const LEFT = 50;
 const RIGHT = 250;
@@ -268,5 +268,25 @@ describe("runningOnInto", () => {
   it("adds nothing after a space, or before nothing", () => {
     expect(runningOnInto([{ text: "here ", style: 0 }], next)).toEqual([{ text: "here ", style: 0 }]);
     expect(runningOnInto([{ text: "here", style: 0 }], [])).toEqual([{ text: "here", style: 0 }]);
+  });
+});
+
+describe("runsBetween", () => {
+  const runs = [
+    { text: "plain ", style: 0 },
+    { text: "italic", style: 1 },
+    { text: " plain", style: 0 },
+  ];
+
+  it("cuts the runs at both ends, keeping each piece's style", () => {
+    expect(runsBetween(runs, 3, 14)).toEqual([
+      { text: "in ", style: 0 },
+      { text: "italic", style: 1 },
+      { text: " p", style: 0 },
+    ]);
+  });
+
+  it("gives nothing for an empty stretch", () => {
+    expect(runsBetween(runs, 6, 6)).toEqual([]);
   });
 });
