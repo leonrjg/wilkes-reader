@@ -119,6 +119,11 @@ export function attachWebkitMarginSelection(textLayer: HTMLElement): () => void 
     if (!a) return;
 
     e.preventDefault(); // suppress WebKit's broken whitespace anchoring
+    // A prevented mousedown also keeps focus where it was, so the reader would
+    // never receive the keys it listens for (arrow page stepping). Give focus
+    // to the reader the click landed in, as an unprevented click would have.
+    const reader = textLayer.closest<HTMLElement>("[tabindex]");
+    if (reader && document.activeElement !== reader) reader.focus({ preventScroll: true });
     anchor = a;
     window.getSelection()?.setBaseAndExtent(a.node, a.offset, a.node, a.offset);
     window.addEventListener("mousemove", onMove, true);
